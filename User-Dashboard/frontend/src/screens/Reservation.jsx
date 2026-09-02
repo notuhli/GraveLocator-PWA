@@ -4,7 +4,7 @@
 // to api/reservationApi.js (mock/local data), never to Supabase directly. See
 // BACKEND_INTEGRATION.md for what a backend developer needs to change.
 // ─────────────────────────────────────────────────────────────────────────────
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import BottomNav from '../components/BottomNav'
 import { useApp } from '../context/AppContext'
 import { useMyReservations, useReservation, usePricing } from '../hooks'
@@ -28,7 +28,7 @@ const BackHeader = ({ title, sub, onBack }) => (
 // Reached from PlotDetailScreen with context.activeLot already set. Lot info
 // (block/lawn/lot no./classification/price) is auto-filled and read-only —
 // the applicant only fills in what the lot itself can't supply.
-export function ReserveFormScreen({ onNavigate }) {
+export function ReserveFormScreen({ onNavigate, onBack }) {
   const { activeLot, user, setReservationDraft } = useApp()
   const { pricing } = usePricing()
 
@@ -58,7 +58,7 @@ export function ReserveFormScreen({ onNavigate }) {
 
   return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
-      <BackHeader title="Reservation Form" sub={`${lot.blockName} · Lot ${lot.lotNo}`} onBack={() => onNavigate('plotdetail')} />
+      <BackHeader title="Reservation Form" sub={`${lot.blockName} · Lot ${lot.lotNo}`} onBack={() => onBack('plotdetail', { activeLot: lot })} />
       <div className="form-wrap">
         <p className="section-label" style={{ marginBottom: 10 }}>Cemetery Lot</p>
         <div className="card" style={{ marginBottom: 18 }}>
@@ -103,17 +103,17 @@ export function ReserveFormScreen({ onNavigate }) {
 }
 
 // ── ReserveSummaryScreen ─────────────────────────────────────────────────────
-export function ReserveSummaryScreen({ onNavigate }) {
+export function ReserveSummaryScreen({ onNavigate, onBack }) {
   const { reservationDraft, user, setActiveReservationId } = useApp()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
   const d = reservationDraft
-  if (!d) {
-    // Reached directly (e.g. a refresh) with no draft in memory — bounce back.
-    onNavigate('map')
-    return null
-  }
+  useEffect(() => {
+    if (!d) onNavigate('map', {}, { replace: true })
+  }, [d, onNavigate])
+
+  if (!d) return null
 
   async function handleConfirm() {
     if (submitting) return // prevent double-click submissions
@@ -137,7 +137,7 @@ export function ReserveSummaryScreen({ onNavigate }) {
 
   return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
-      <BackHeader title="Reservation Summary" onBack={() => onNavigate('reserve-form')} />
+      <BackHeader title="Reservation Summary" onBack={() => onBack('reserve-form')} />
       <div className="form-wrap">
         <div className="card" style={{ marginBottom: 14 }}>
           <p className="section-label" style={{ margin: '0 0 10px' }}>Applicant</p>
@@ -169,7 +169,7 @@ export function ReserveSummaryScreen({ onNavigate }) {
 
         {error && <p style={{ color: '#DC2626', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
         <div className="plot-actions">
-          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => onNavigate('reserve-form')} disabled={submitting}>Back</button>
+          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => onBack('reserve-form')} disabled={submitting}>Back</button>
           <button className="btn btn-primary btn-sm" style={{ flex: 2 }} onClick={handleConfirm} disabled={submitting}>
             {submitting ? 'Submitting…' : 'Confirm Reservation'}
           </button>
@@ -210,7 +210,7 @@ export function MyReservationsScreen({ onNavigate }) {
   const { user, setActiveReservationId } = useApp()
   const { reservations, loading } = useMyReservations(user?.id)
 
-  const open = (r) => { setActiveReservationId(r.id); onNavigate('reservation-detail') }
+  const open = (r) => { setActiveReservationId(r.id); onNavigate('reservation-detail', { reservationId: r.id }) }
 
   return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
@@ -244,7 +244,7 @@ export function MyReservationsScreen({ onNavigate }) {
 }
 
 // ── ReservationDetailScreen ──────────────────────────────────────────────────
-export function ReservationDetailScreen({ onNavigate }) {
+export function ReservationDetailScreen({ onNavigate, onBack }) {
   const { activeReservationId } = useApp()
   const { reservation, loading, reload } = useReservation(activeReservationId)
   const [cancelling, setCancelling] = useState(false)
@@ -263,7 +263,7 @@ export function ReservationDetailScreen({ onNavigate }) {
   if (loading) return <div className="screen active" style={{ background: 'var(--cream)' }}><p className="f13 c-stone" style={{ textAlign: 'center', padding: 40 }}>Loading…</p></div>
   if (!reservation) return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
-      <BackHeader title="Reservation" onBack={() => onNavigate('my-reservations')} />
+      <BackHeader title="Reservation" onBack={() => onBack('my-reservations')} />
       <p className="f13 c-stone" style={{ textAlign: 'center', padding: 40 }}>Reservation not found.</p>
     </div>
   )
@@ -271,7 +271,7 @@ export function ReservationDetailScreen({ onNavigate }) {
   const r = reservation
   return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
-      <BackHeader title={`${r.blockName} · Lot ${r.lotNo}`} sub={r.lawnName} onBack={() => onNavigate('my-reservations')} />
+      <BackHeader title={`${r.blockName} · Lot ${r.lotNo}`} sub={r.lawnName} onBack={() => onBack('my-reservations')} />
       <div className="scroll-body">
         <div style={{ marginBottom: 14 }}>
           <span className={`badge ${reservationStatusBadge(r.status)}`}>{reservationStatusLabel(r.status)}</span>
