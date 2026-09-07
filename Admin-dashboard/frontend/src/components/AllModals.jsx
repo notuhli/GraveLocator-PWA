@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useAdmin } from '../context/AdminContext'
 import { STATUS, STATUS_META, STATUS_ORDER } from '../config/status'
-import { USER_STATUS, ADMIN_ROLE } from '../config/adminStatus'
+import { USER_STATUS, ADMIN_ROLE, RESERVATION_STATUS, RESERVATION_STATUS_META } from '../config/adminStatus'
 import { plotLabel, plotShort } from '../utils/plot'
+import { peso } from '../utils/format'
 import * as api from '../api'
 
 // Shared shell: reads context.modal, renders nothing when it's not this modal's id.
@@ -237,6 +238,61 @@ function AddAdminModal() {
   )
 }
 
+// ── Reservation Detail (admin view — same data the applicant sees, plus
+// Confirm / Reject / Cancel actions) ─────────────────────────────────────────
+function ReservationDetailModal() {
+  const { modal, closeModal } = useAdmin()
+  const isOpen = modal?.id === 'modal-reservation-detail'
+  const r = modal?.record || null
+  const [busy, setBusy] = useState(false)
+  if (!isOpen || !r) return null
+
+  const setStatus = async (status) => {
+    setBusy(true)
+    try { await api.updateReservationStatus(r.id, status); closeModal() }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal id="modal-reservation-detail" title={`${r.blockName} · Lot ${r.lotNo}`} subtitle={r.lawnName}>
+      <div style={{ marginBottom: 14 }}>
+        <span className={`badge ${RESERVATION_STATUS_META[r.status].badge}`}>{RESERVATION_STATUS_META[r.status].label}</span>
+      </div>
+      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--dgray)', marginBottom: 6 }}>Applicant</p>
+      {[['Name', r.applicantName], ['Email', r.email], ['Contact', r.contactNumber]].map(([l, v]) => (
+        <div key={l} className="detail-row"><span className="detail-label">{l}</span><span className="detail-val">{v}</span></div>
+      ))}
+      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--dgray)', margin: '14px 0 6px' }}>Cemetery Lot</p>
+      {[['Block', r.blockName], ['Lawn', r.lawnName || '—'], ['Lot Number', r.lotNo], ['Classification', r.classification]].map(([l, v]) => (
+        <div key={l} className="detail-row"><span className="detail-label">{l}</span><span className="detail-val">{v}</span></div>
+      ))}
+      <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--dgray)', margin: '14px 0 6px' }}>Reservation</p>
+      {[
+        ['Reservation Date', r.reservationDate],
+        ['Price', peso(r.price)],
+        ['Payment Option', r.paymentOption === 'installment' ? 'Installment' : 'Cash'],
+        ['Submitted', new Date(r.createdAt).toLocaleString()],
+        ['Notes', r.notes || '—'],
+      ].map(([l, v]) => (
+        <div key={l} className="detail-row"><span className="detail-label">{l}</span><span className="detail-val">{v}</span></div>
+      ))}
+
+      <div className="modal-actions">
+        <button className="btn btn-outline" onClick={closeModal} disabled={busy}>Close</button>
+        {r.status === RESERVATION_STATUS.PENDING && (
+          <>
+            <button className="btn btn-danger" onClick={() => setStatus(RESERVATION_STATUS.REJECTED)} disabled={busy}>Reject</button>
+            <button className="btn btn-primary" onClick={() => setStatus(RESERVATION_STATUS.CONFIRMED)} disabled={busy}>Confirm</button>
+          </>
+        )}
+        {r.status === RESERVATION_STATUS.CONFIRMED && (
+          <button className="btn btn-danger" onClick={() => setStatus(RESERVATION_STATUS.CANCELLED)} disabled={busy}>Cancel Reservation</button>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 export default function AllModals() {
   return (
     <>
@@ -245,6 +301,7 @@ export default function AllModals() {
       <UserFormModal id="modal-edituser" title="Edit User Profile" />
       <AddMemorialModal />
       <AddAdminModal />
+      <ReservationDetailModal />
     </>
   )
 }

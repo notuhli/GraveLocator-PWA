@@ -3,12 +3,14 @@ import Topbar from './Topbar'
 import AllModals from './AllModals'
 import DashboardPage from '../pages/DashboardPage'
 import PlotsPage from '../pages/PlotsPage'
+import ReservationsPage from '../pages/ReservationsPage'
 import { UsersPage, MemorialsPage, ReportsPage, NotificationsPage, SettingsPage } from '../pages/OtherPages'
 import { useAdmin } from '../context/AdminContext'
 
 const pages = {
   dashboard: DashboardPage,
   plots: PlotsPage,
+  reservations: ReservationsPage,
   users: UsersPage,
   memorials: MemorialsPage,
   reports: ReportsPage,
@@ -26,7 +28,7 @@ export default function AdminLayout() {
       <Sidebar />
       <Topbar />
 
-      <main style={{
+      <main className="admin-main" style={{
         marginLeft: 'var(--sidebar)',
         marginTop: 'var(--topbar)',
         padding: 28,

@@ -22,6 +22,8 @@ export function AppProvider({ children }) {
   const [authLoading, setAuthLoading] = useState(ENV.USE_REMOTE)
   const [activeBlockId, setActiveBlockId] = useState(null) // map: which block is open
   const [activeLot, setActiveLot] = useState(null)         // map → plot-detail handoff
+  const [reservationDraft, setReservationDraft] = useState(null) // reserve-form → summary handoff
+  const [activeReservationId, setActiveReservationId] = useState(null) // reservation list → detail handoff
 
   function toUser(u) {
     return {
@@ -89,7 +91,11 @@ export function AppProvider({ children }) {
     setActiveBlockId,
     activeLot,
     setActiveLot,
-  }), [user, authLoading, activeBlockId, activeLot])
+    reservationDraft,
+    setReservationDraft,
+    activeReservationId,
+    setActiveReservationId,
+  }), [user, authLoading, activeBlockId, activeLot, reservationDraft, activeReservationId])
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

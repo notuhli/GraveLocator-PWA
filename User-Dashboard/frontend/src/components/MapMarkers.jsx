@@ -4,9 +4,8 @@
 // viewport transform from MapViewport. As you zoom in, more tiers fade in and
 // labels grow from short → full. Markers outside the viewport are culled.
 //
-// The base map is rotated 90° to fill the screen, so a POI at image-fraction
-// (fx, fy) maps to screen:  x = tx + s·(1−fy)·vw ,  y = ty + s·fx·contentH
-// (derived for the CSS rotate(90deg) on the map).
+// The map is shown in its natural (unrotated) landscape orientation, so a POI
+// at image-fraction (fx, fy) maps to screen:  x = tx + s·fx·vw ,  y = ty + s·fy·contentH
 // ─────────────────────────────────────────────────────────────────────────────
 import { POIS, TIER_MIN, FADE, LABEL_FULL } from '../data/pois'
 
@@ -24,10 +23,10 @@ export default function MapMarkers({ t, onSelectBlock, activeBlockId }) {
         const opacity = Math.max(0, Math.min(1, (scale - start) / FADE))
         if (opacity <= 0.02) return null
 
-        // Screen position (rotation-aware) + viewport culling.
+        // Screen position (natural landscape orientation) + viewport culling.
         const fx = poi.x / 100, fy = poi.y / 100
-        const x = tx + scale * (1 - fy) * vw
-        const y = ty + scale * fx * contentH
+        const x = tx + scale * fx * vw
+        const y = ty + scale * fy * contentH
         if (x < -CULL_MARGIN || x > vw + CULL_MARGIN || y < -CULL_MARGIN || y > vh + CULL_MARGIN) return null
 
         // Label LOD: dot → short label → full label as you zoom in.

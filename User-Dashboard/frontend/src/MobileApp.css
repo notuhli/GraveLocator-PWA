@@ -31,10 +31,37 @@ html, body, #root {
   background: var(--cream);
 }
 
-/* ── App Root ── */
-.app-root {
+/* ── App Shell ──────────────────────────────────────────────────────────────
+   Mobile (< 960px): a single full-viewport column — SideNav is not rendered,
+   each screen renders its own BottomNav as before.
+   Desktop/laptop (>= 960px): a row — persistent SideNav + a wide content pane
+   (.app-root stretches to fill the rest of the window instead of being boxed
+   into a phone-sized card). No mobile-shaped container is used at any width.
+
+   Height uses 100dvh (dynamic viewport height), NOT 100vh. On mobile Chrome/
+   Safari, 100vh is sized to the LARGEST possible viewport (as if the browser's
+   address bar/toolbar were hidden) — taller than what's actually visible when
+   the toolbar is showing. Because .app-root/.screen are flex columns that end
+   with the bottom nav and are also `overflow: hidden`, that extra height used
+   to push the bottom nav below the real, visible viewport — exactly the "can't
+   reach the bottom nav" bug. 100dvh always tracks the true visible height, so
+   the flex column (and the nav at the end of it) never exceeds what's on
+   screen. `100vh` is kept first as a fallback for the handful of browsers that
+   don't support dvh yet — the dvh line below overrides it where supported.
+   ── */
+.app-shell {
   width: 100%;
   height: 100vh;
+  height: 100dvh;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── App Root (main content pane) ── */
+.app-root {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -134,6 +161,9 @@ html, body, #root {
 .badge-confirmed { background: #DCFCE7; color: #16A34A; }
 .badge-pending { background: #FEF9C3; color: #CA8A04; }
 .badge-expired { background: #FEE2E2; color: #DC2626; }
+.badge-rejected { background: #FEE2E2; color: #DC2626; }
+.badge-cancelled { background: var(--lgray); color: var(--stone); }
+.badge-completed { background: #DBEAFE; color: #1D4ED8; }
 
 /* ── Bottom Nav ── */
 .bottom-nav {
@@ -160,6 +190,15 @@ html, body, #root {
 .nav-item.active .nav-pill { background: var(--pgreen); }
 .nav-label { font-size: 10px; font-weight: 500; color: var(--stone); transition: all .2s; }
 .nav-item.active .nav-label { font-weight: 700; color: var(--sage); }
+
+/* ── Side Nav (desktop/laptop only — see .app-shell above) ───────────────────
+   Same nav items/icons as .bottom-nav, laid out as a persistent vertical rail
+   instead of a bottom bar, so desktop users always have navigation without a
+   phone-shaped bottom bar and without losing the ability to get back to Home/
+   Map/Memorials/Profile from screens (like lot detail or the reservation flow)
+   that don't render their own BottomNav on mobile. Hidden by default; shown
+   only inside the >= 960px media query further down. ── */
+.side-nav { display: none; }
 
 /* ── Inputs ── */
 .inp {
@@ -730,11 +769,17 @@ textarea.inp { resize: none; }
 .hm-lawn-meta { font-size: 11px; color: var(--stone); margin: 0; }
 
 /* ── Map viewport: pan + zoom (.mv-*) ─────────────────────────────────────── */
+/* The map is shown in its natural landscape orientation (not rotated), so the
+   whole cemetery is visible at once on open — no cropping, no forced portrait
+   crop. On a narrow phone this letterboxes above/below; MapViewport's own
+   pinch/scroll-wheel zoom + the +/−/reset controls handle drilling into detail
+   from there (see section "Landscape Cemetery Map" in the reservation brief). */
 .mv { position: relative; flex: 1; min-height: 0; display: flex; }
 .mv-vp {
   position: relative; flex: 1; overflow: hidden;
   background: linear-gradient(180deg, #e9f2fb 0%, #f3f5ef 55%, var(--cream) 100%);
   touch-action: none; cursor: grab;
+  display: flex; align-items: center; /* letterbox the shorter-than-tall map */
 }
 .mv-vp:active { cursor: grabbing; }
 .mv-content {
@@ -743,16 +788,6 @@ textarea.inp { resize: none; }
 }
 /* Inside the viewport the map fills the width edge-to-edge. */
 .mv-content .pm-wrap { max-width: none; margin: 0; border-radius: 0; box-shadow: none; }
-
-/* Rotate the wide map 90° so its proportions match the tall (portrait) viewport
-   and it fills the screen with no blank bands. The whole park stays visible;
-   pan/zoom still work because this sits inside .mv-content. */
-.pm-rot { position: relative; width: 100%; aspect-ratio: 939 / 1674; }
-.pm-rot-inner {
-  position: absolute; top: 50%; left: 50%;
-  width: 178.275%; height: 56.094%;
-  transform: translate(-50%, -50%) rotate(90deg); transform-origin: center;
-}
 
 .mv-ctrls {
   position: absolute; right: 12px; bottom: 14px; z-index: 5;
@@ -776,3 +811,60 @@ html, body { overscroll-behavior: none; overflow: hidden; }
 }
 input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
 img, svg { -webkit-user-drag: none; user-drag: none; }
+
+/* ── Desktop / laptop shell (small laptops and up) ────────────────────────────
+   Below this breakpoint nothing changes — phones, large phones, and tablets
+   keep the exact mobile layout (bottom nav, full-bleed screens) that already
+   works well. At and above it, the app stops looking like a phone: the
+   BottomNav is replaced by a persistent SideNav, .app-root stretches to fill
+   the rest of the window (no more phone-sized card), and read-heavy content
+   (forms, lists) gets a comfortable max width instead of stretching edge to
+   edge on very wide monitors — the map and hero sections are NOT capped, so
+   they still take advantage of the full available width. ── */
+@media (min-width: 960px) {
+  .side-nav {
+    display: flex; flex-direction: column; justify-content: space-between;
+    width: 232px; flex-shrink: 0; height: 100%;
+    background: linear-gradient(180deg, var(--forest), var(--sage));
+    padding: 22px 0;
+  }
+  .side-nav-brand { display: flex; align-items: center; gap: 10px; padding: 0 22px 22px; }
+  .side-nav-brand-icon {
+    width: 38px; height: 38px; border-radius: 11px; background: rgba(255,255,255,.15);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .side-nav-brand-title { font-family: var(--ff-d); font-size: 17px; color: #fff; line-height: 1.2; }
+  .side-nav-brand-sub { font-size: 11px; color: rgba(255,255,255,.6); }
+  .side-nav-items { display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
+  .side-nav-item {
+    display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px;
+    color: rgba(255,255,255,.7); cursor: pointer; transition: all .15s; font-size: 14px; font-weight: 600;
+  }
+  .side-nav-item svg { flex-shrink: 0; }
+  .side-nav-item:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .side-nav-item.active { background: rgba(255,255,255,.16); color: #fff; }
+  .side-nav-footer { padding: 0 22px; font-size: 11px; color: rgba(255,255,255,.45); }
+
+  /* The BottomNav each screen renders on mobile is redundant once SideNav is
+     shown — hide it rather than render two navs at once. */
+  .bottom-nav { display: none; }
+
+  /* .app-root is no longer a boxed phone frame — it's the main content pane. */
+  .app-root { width: auto; }
+
+  /* Headers/content get a bit more breathing room at desktop sizes. */
+  .hdr, .home-hdr, .profile-hdr, .login-hdr { padding-left: 32px; padding-right: 32px; }
+  .scroll-body, .form-wrap {
+    padding-left: 32px; padding-right: 32px;
+    max-width: 1040px; width: 100%; margin: 0 auto;
+  }
+  .quick-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .info-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+}
+
+/* Tablet landscape: still the mobile (bottom-nav) layout, just a little more
+   breathing room so it doesn't feel like a stretched phone screen. */
+@media (min-width: 700px) and (max-width: 959px) {
+  .quick-grid { grid-template-columns: repeat(4, 1fr); }
+  .hdr, .home-hdr, .profile-hdr, .login-hdr, .scroll-body, .form-wrap { padding-left: 28px; padding-right: 28px; }
+}

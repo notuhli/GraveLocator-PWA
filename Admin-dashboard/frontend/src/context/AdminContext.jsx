@@ -30,6 +30,7 @@ export function AdminProvider({ children }) {
   const [modal, setModal] = useState(null)           // { id, record? } | null
   const [activeBlockId, setActiveBlockId] = useState(null) // Plot Management: which block is open
   const [activeLot, setActiveLot] = useState(null)          // Plot Management: selected lot
+  const [sidebarOpen, setSidebarOpen] = useState(false)      // mobile: off-canvas sidebar drawer
 
   function toAdmin(session, profileRole) {
     const u = session.user
@@ -94,7 +95,11 @@ export function AdminProvider({ children }) {
     setActiveBlockId,
     activeLot,
     setActiveLot,
-  }), [admin, authLoading, authError, activePage, modal, activeBlockId, activeLot])
+
+    sidebarOpen,
+    toggleSidebar: () => setSidebarOpen((o) => !o),
+    closeSidebar: () => setSidebarOpen(false),
+  }), [admin, authLoading, authError, activePage, modal, activeBlockId, activeLot, sidebarOpen])
 
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>
 }

@@ -18,12 +18,15 @@ function lockViewport() {
     'content',
     'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover',
   )
-  // Belt-and-suspenders: cancel pinch / double-tap zoom gestures (iOS Safari/WebView).
-  document.addEventListener('gesturestart', (e) => e.preventDefault())
+  // Keep the existing app-level zoom lock, but leave the interactive map's
+  // touch surface alone so MapViewport can handle pinch/drag itself.
+  document.addEventListener('gesturestart', (e) => {
+    if (!e.target?.closest?.('.mv-vp')) e.preventDefault()
+  })
   let lastTouch = 0
   document.addEventListener('touchend', (e) => {
     const now = Date.now()
-    if (now - lastTouch <= 300) e.preventDefault()
+    if (!e.target?.closest?.('.mv-vp') && now - lastTouch <= 300) e.preventDefault()
     lastTouch = now
   }, { passive: false })
 }

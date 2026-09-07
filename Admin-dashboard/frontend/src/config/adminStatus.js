@@ -32,3 +32,20 @@ export const ADMIN_ROLE = {
   ADMIN:       'Admin',
   SUPER_ADMIN: 'Super Admin',
 }
+
+// Reservation workflow status — kept identical to the User-Dashboard's
+// config/reservationStatus.js so both apps agree on the same values.
+export const RESERVATION_STATUS = {
+  PENDING:   'pending',
+  CONFIRMED: 'confirmed',
+  REJECTED:  'rejected',
+  CANCELLED: 'cancelled',
+  COMPLETED: 'completed',
+}
+export const RESERVATION_STATUS_META = {
+  [RESERVATION_STATUS.PENDING]:   { label: 'Pending',   badge: 'badge-pending' },
+  [RESERVATION_STATUS.CONFIRMED]: { label: 'Confirmed', badge: 'badge-confirmed' },
+  [RESERVATION_STATUS.REJECTED]:  { label: 'Rejected',  badge: 'badge-rejected' },
+  [RESERVATION_STATUS.CANCELLED]: { label: 'Cancelled', badge: 'badge-cancelled' },
+  [RESERVATION_STATUS.COMPLETED]: { label: 'Completed', badge: 'badge-completed' },
+}

@@ -1,14 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useBlocks, usePricing } from '../hooks'
 import { useApp } from '../context/AppContext'
 import { CLASSIFICATION } from '../config/constants'
-import { statusLabel, statusMeta } from '../config/status'
+import { statusLabel, statusMeta, isSellable } from '../config/status'
 import { peso, percent, intermentMarks } from '../utils/format'
 
 // ── SearchScreen ─────────────────────────────────────────────────────────────
 // Searches real blocks (name / lawn name). Tapping a result opens the map,
 // where the per-block lot grid + lot-level search live (Map feature).
-export function SearchScreen({ onNavigate }) {
+export function SearchScreen({ onNavigate, onBack }) {
   const [query, setQuery] = useState('')
   const { blocks } = useBlocks()
   const { setActiveBlockId } = useApp()
@@ -22,13 +22,13 @@ export function SearchScreen({ onNavigate }) {
       )
     : []
 
-  const open = (b) => { setActiveBlockId(b.id); onNavigate('map') }
+  const open = (b) => { setActiveBlockId(b.id); onNavigate('map', { blockId: b.id }) }
 
   return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
       <div className="hdr" style={{ padding: '14px 16px' }}>
         <div className="flex gap-10 items-center">
-          <button className="back-btn" onClick={() => onNavigate('home')}>
+          <button className="back-btn" onClick={() => onBack('home')}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <div className="search-inp-wrap">
@@ -79,19 +79,34 @@ export function SearchScreen({ onNavigate }) {
   )
 }
 
-// ── PlotDetailScreen (view-only) ─────────────────────────────────────────────
-// Browsing only — there is no plot reservation/booking in the app. This shows a
-// lot's block, lawn, classification, status and reference pricing, and lets the
-// user locate it on the map. Lot context comes from the map drill-down.
-export function PlotDetailScreen({ onNavigate }) {
-  const { activeLot, setActiveBlockId } = useApp()
+// ── PlotDetailScreen ─────────────────────────────────────────────────────────
+// Shows a lot's block, lawn, classification, status and reference pricing, and
+// lets the user locate it on the map. Lot context comes from the map
+// drill-down. Available lots also offer a "Reserve Lot" action that hands the
+// lot off to the reservation flow (frontend-only demo — see
+// BACKEND_INTEGRATION.md).
+export function PlotDetailScreen({ onNavigate, onBack, routeLot }) {
+  const { activeLot, setActiveLot, setActiveBlockId } = useApp()
+  const { blocks } = useBlocks()
   const { pricing } = usePricing()
 
-  // Falls back to a sample lot when reached directly (e.g. Home → a lawn).
-  const lot = activeLot || {
+  // The full lot object is kept in history.state for normal navigation. A
+  // direct URL may only have blockId/lotNo, so keep a safe sample fallback
+  // rather than breaking the page while data is loading.
+  const routeActiveLot = routeLot?.activeLot || null
+  const routeBlock = routeLot?.blockId ? blocks.find((b) => b.id === routeLot.blockId) : null
+  const lot = routeActiveLot || activeLot || (routeLot?.blockId && routeLot?.lotNo ? {
+    blockId: routeLot.blockId,
+    blockName: routeBlock?.name || `Block ${String(routeLot.blockId).replace(/^block[-_]/i, '')}`,
+    lawnName: routeBlock?.lawnName || '',
+    lotNo: routeLot.lotNo,
+    classification: CLASSIFICATION.REGULAR,
+    status: 'available',
+    intermentCount: 0,
+  } : {
     blockId: 'block-3', blockName: 'Block 3', lawnName: 'Timeless Memory Lawn',
     lotNo: 204, classification: CLASSIFICATION.REGULAR, status: 'available', intermentCount: 0,
-  }
+  })
   const meta = statusMeta(lot.status)
   const marks = intermentMarks(lot.intermentCount)
   const p = pricing?.installment?.[lot.classification] || null
@@ -99,15 +114,23 @@ export function PlotDetailScreen({ onNavigate }) {
 
   const planRows = [['1yr', '1 Year'], ['2yr', '2 Years'], ['3yr', '3 Years']]
 
+  useEffect(() => {
+    if (routeActiveLot && activeLot !== routeActiveLot) {
+      setActiveLot(routeActiveLot)
+    } else if (routeLot?.blockId && routeLot?.lotNo && !activeLot) {
+      setActiveLot(lot)
+    }
+  }, [routeActiveLot, routeLot?.blockId, routeLot?.lotNo, activeLot, lot, setActiveLot])
+
   const locateOnMap = () => {
     if (lot.blockId) setActiveBlockId(lot.blockId)
-    onNavigate('map')
+    onNavigate('map', { blockId: lot.blockId })
   }
 
   return (
     <div className="screen active" style={{ background:'var(--cream)' }}>
       <div className="hdr hdr-row" style={{ flexShrink:0 }}>
-        <button className="back-btn" onClick={() => onNavigate('map')} aria-label="Back to map">
+        <button className="back-btn" onClick={() => onBack('map')} aria-label="Back to map">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
         <h2>Lot Details</h2>
@@ -173,6 +196,12 @@ export function PlotDetailScreen({ onNavigate }) {
           ) : <p className="f13 c-stone">No reference pricing for this classification.</p>}
         </div>
 
+        {isSellable(lot.status) && (
+          <button className="btn btn-gold btn-full" style={{ marginBottom: 10 }} onClick={() => onNavigate('reserve-form', { activeLot: lot })}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+            Reserve Lot
+          </button>
+        )}
         <div className="plot-actions">
           <button className="btn btn-primary btn-sm" style={{ flex:2 }} onClick={locateOnMap}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5" fill="#fff"/></svg>

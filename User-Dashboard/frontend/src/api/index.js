@@ -11,6 +11,7 @@ import { PRICING, CASH_PRICING, INSTALLMENT_FACTORS, INTERMENT_FEES, PRICING_NOT
 import { INSTALLMENT_INTEREST } from '../config/constants'
 import { LEGEND } from '../data/legend'
 import { MEMORIALS } from '../data/memorials'
+import { createReservation, getMyReservations, getReservationById, cancelReservation } from './reservationApi'
 
 // Row shape from Supabase (snake_case) → the shape screens already expect (camelCase).
 function blockFromRow(row) {
@@ -212,3 +213,7 @@ export async function getCurrentSession() {
   if (error) throw error
   return data.session
 }
+
+// ── Reservations — re-exported so screens only ever import from api/ ────────
+// (see reservationApi.js for the actual mock implementation + backend notes)
+export { createReservation, getMyReservations, getReservationById, cancelReservation }

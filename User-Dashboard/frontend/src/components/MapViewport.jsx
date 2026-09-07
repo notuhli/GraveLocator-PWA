@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // MapViewport — wraps the ParkMap and gives it real-map pan + zoom: one-finger
-// drag to pan, two-finger pinch to zoom (mouse-wheel on desktop), plus +/−/reset
-// controls. Taps still pass through to block markers; a tap is only swallowed if
+// drag to pan, two-finger pinch to zoom (mouse-wheel on desktop). Taps still
+// pass through to block markers; a tap is only swallowed if
 // the user actually dragged/pinched. No external libraries.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef, useState, useEffect, useCallback } from 'react'
@@ -18,16 +18,27 @@ export default function MapViewport({ children, overlay }) {
   const [dims, setDims] = useState({ vw: 0, vh: 0, contentH: 0 })
 
   // Track viewport + content size (for the LOD marker overlay + culling).
+  // Also center the map the first time we know its real size — the map is
+  // shown at its natural (landscape) aspect ratio, so on most phones it's
+  // shorter than the viewport and should sit centered, not pinned to the top.
+  const centered = useRef(false)
   useEffect(() => {
     const measure = () => {
       const w = wrapRef.current, inner = innerRef.current
-      if (w) setDims({ vw: w.clientWidth, vh: w.clientHeight, contentH: inner ? inner.clientHeight : w.clientWidth * 1674 / 939 })
+      if (!w) return
+      const next = { vw: w.clientWidth, vh: w.clientHeight, contentH: inner ? inner.clientHeight : w.clientWidth * 1674 / 939 }
+      setDims(next)
+      if (!centered.current && next.contentH > 0) {
+        centered.current = true
+        setT((p) => clamp(p.s, p.x, p.y))
+      }
     }
     measure()
     const ro = new ResizeObserver(measure)
     if (wrapRef.current) ro.observe(wrapRef.current)
     if (innerRef.current) ro.observe(innerRef.current)
     return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Keep the scaled map inside the viewport (centered when smaller than it).
@@ -97,12 +108,6 @@ export default function MapViewport({ children, overlay }) {
     return clamp(s, px - k * (px - p.x), py - k * (py - p.y))
   })
 
-  const zoomCenter = (factor) => {
-    const W = wrapRef.current.clientWidth, H = wrapRef.current.clientHeight
-    zoomAt(factor, W / 2, H / 2)
-  }
-  const reset = () => setT(clamp(1, 0, 0))
-
   // Native (non-passive) wheel zoom so preventDefault works on desktop.
   useEffect(() => {
     const el = wrapRef.current
@@ -130,7 +135,6 @@ export default function MapViewport({ children, overlay }) {
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
-        onPointerLeave={onUp}
         onClickCapture={onClickCapture}
       >
         <div ref={innerRef} className="mv-content" style={{ transform: `translate(${t.x}px, ${t.y}px) scale(${t.s})` }}>
@@ -141,13 +145,6 @@ export default function MapViewport({ children, overlay }) {
             {overlay({ scale: t.s, tx: t.x, ty: t.y, vw: dims.vw, vh: dims.vh, contentH: dims.contentH })}
           </div>
         )}
-      </div>
-      <div className="mv-ctrls">
-        <button type="button" className="mv-btn" onClick={() => zoomCenter(1.4)} aria-label="Zoom in">+</button>
-        <button type="button" className="mv-btn" onClick={() => zoomCenter(1 / 1.4)} aria-label="Zoom out">−</button>
-        <button type="button" className="mv-btn mv-btn-fit" onClick={reset} aria-label="Reset view">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-        </button>
       </div>
     </div>
   )

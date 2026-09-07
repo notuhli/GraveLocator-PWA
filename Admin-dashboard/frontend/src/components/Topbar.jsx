@@ -3,6 +3,7 @@ import { useAdmin } from '../context/AdminContext'
 const pageTitles = {
   dashboard: 'Dashboard Overview',
   plots: 'Plot Management',
+  reservations: 'Reservation Management',
   users: 'User Management',
   memorials: 'Digital Memorial Management',
   reports: 'Reports & Analytics',
@@ -11,14 +12,22 @@ const pageTitles = {
 }
 
 export default function Topbar() {
-  const { activePage } = useAdmin()
+  const { activePage, toggleSidebar } = useAdmin()
   return (
-    <header style={{
+    <header className="admin-topbar" style={{
       position: 'fixed', left: 'var(--sidebar)', right: 0, top: 0, height: 'var(--topbar)',
       background: '#fff', borderBottom: '1px solid var(--lgray)', display: 'flex',
       alignItems: 'center', padding: '0 28px', zIndex: 99,
       boxShadow: '0 2px 8px rgba(0,0,0,.04)'
     }}>
+      <button
+        className="admin-menu-btn"
+        onClick={toggleSidebar}
+        aria-label="Toggle menu"
+        style={{ display: 'none', width: 34, height: 34, borderRadius: 8, border: '1.5px solid var(--lgray)', background: '#fff', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginRight: 12, flexShrink: 0 }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--charcoal)" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
       <p style={{ fontFamily: 'var(--ff-d)', fontSize: 18, color: 'var(--charcoal)', fontWeight: 600, flex: 1 }}>
         {pageTitles[activePage] || activePage}
       </p>

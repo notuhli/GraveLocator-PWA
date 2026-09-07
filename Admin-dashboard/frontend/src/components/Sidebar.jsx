@@ -1,6 +1,6 @@
 import { useAdmin } from '../context/AdminContext'
-import { useMemorialQueue } from '../hooks'
-import { MEMORIAL_STATUS } from '../config/adminStatus'
+import { useMemorialQueue, useReservations } from '../hooks'
+import { MEMORIAL_STATUS, RESERVATION_STATUS } from '../config/adminStatus'
 import { PARK, ENV } from '../config/constants'
 
 const navItems = [
@@ -9,6 +9,7 @@ const navItems = [
   ]},
   { section: 'Management', items: [
     { id: 'plots', label: 'Plot Management', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg> },
+    { id: 'reservations', label: 'Reservations', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>, badgeKey: 'reservations' },
     { id: 'users', label: 'User Management', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg> },
     { id: 'memorials', label: 'Digital Memorials', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>, badgeKey: 'memorials' },
   ]},
@@ -20,19 +21,23 @@ const navItems = [
 ]
 
 export default function Sidebar() {
-  const { activePage, setActivePage, admin, logout, signOut } = useAdmin()
-  // Real pending-item count, computed from the same shared data the
-  // Memorials page reads — the badge can never drift from the actual table.
+  const { activePage, setActivePage, admin, logout, signOut, sidebarOpen, closeSidebar } = useAdmin()
+  // Real pending-item counts, computed from the same shared data the
+  // Memorials/Reservations pages read — badges can never drift from the actual table.
   const { queue } = useMemorialQueue()
+  const { reservations } = useReservations()
   const badges = {
     memorials: queue.filter((m) => m.status === MEMORIAL_STATUS.PENDING).length,
+    reservations: reservations.filter((r) => r.status === RESERVATION_STATUS.PENDING).length,
   }
 
   return (
-    <aside style={{
+    <>
+    {sidebarOpen && <div className="admin-sidebar-backdrop" onClick={closeSidebar} />}
+    <aside className={`admin-sidebar${sidebarOpen ? ' open' : ''}`} style={{
       position: 'fixed', left: 0, top: 0, bottom: 0, width: 'var(--sidebar)',
       background: 'var(--forest)', display: 'flex', flexDirection: 'column',
-      zIndex: 100, boxShadow: '4px 0 24px rgba(0,0,0,.15)'
+      zIndex: 200, boxShadow: '4px 0 24px rgba(0,0,0,.15)'
     }}>
       {/* Logo */}
       <div style={{ padding: '20px 20px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255,255,255,.08)' }}>
@@ -59,7 +64,7 @@ export default function Sidebar() {
               return (
                 <div
                   key={item.id}
-                  onClick={() => setActivePage(item.id)}
+                  onClick={() => { setActivePage(item.id); closeSidebar() }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px',
                     cursor: 'pointer', transition: 'all .18s', position: 'relative',
@@ -105,5 +110,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   )
 }

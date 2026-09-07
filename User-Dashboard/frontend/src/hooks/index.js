@@ -73,3 +73,17 @@ export function useMemorials() {
   const { data, loading, error, reload } = useAsync(() => api.getMemorials(), [])
   return { memorials: data || [], loading, error, reload }
 }
+
+// ── Reservations ─────────────────────────────────────────────────────────────
+export function useMyReservations(userId) {
+  const { data, loading, error, reload } = useAsync(() => api.getMyReservations(userId), [userId])
+  return { reservations: data || [], loading, error, reload }
+}
+
+export function useReservation(id) {
+  const { data, loading, error, reload } = useAsync(
+    () => (id ? api.getReservationById(id) : Promise.resolve(null)),
+    [id],
+  )
+  return { reservation: data, loading, error, reload }
+}

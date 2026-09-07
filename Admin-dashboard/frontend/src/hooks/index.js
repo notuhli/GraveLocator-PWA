@@ -17,7 +17,8 @@ function useAsync(fn, deps = []) {
     let alive = true
     setLoading(true)
     setError(null)
-    Promise.resolve(fn())
+    Promise.resolve()
+      .then(() => fn())
       .then((res) => { if (alive) setData(res) })
       .catch((err) => { if (alive) setError(err) })
       .finally(() => { if (alive) setLoading(false) })
@@ -89,6 +90,12 @@ export function useAdminStaff() {
 export function useMemorialQueue() {
   const { data, loading, error, reload } = useAsync(() => api.getMemorialQueue(), [])
   return { queue: data || [], loading, error, reload }
+}
+
+// ── Reservations ─────────────────────────────────────────────────────────────
+export function useReservations() {
+  const { data, loading, error, reload } = useAsync(() => api.getReservations(), [])
+  return { reservations: data || [], loading, error, reload }
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

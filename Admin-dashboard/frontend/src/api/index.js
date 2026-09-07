@@ -19,6 +19,7 @@ import { ADMIN_STAFF } from '../data/adminStaff'
 import { MEMORIAL_QUEUE, getMemorialQueueById } from '../data/memorialModeration'
 import { SENT_NOTIFICATIONS, NOTIFICATION_STATS, SYSTEM_ALERTS } from '../data/notifications'
 import { computeDashboardMetrics, computeBlockOccupancy } from '../data/dashboardMetrics'
+import { MOCK_RESERVATIONS, getReservationByIdSync } from '../data/mockReservations'
 import { STATUS } from '../config/status'
 
 // Row shape from Supabase (snake_case) → the shape pages already expect (camelCase).
@@ -331,6 +332,44 @@ export function sendNotification(payload) {
     const rec = { id: `notif-${Date.now()}`, unread: true, sentAt: new Date().toISOString(), ...payload }
     SENT_NOTIFICATIONS.unshift(rec)
     return rec
+  })
+}
+
+// ── Reservations (admin view) ────────────────────────────────────────────────
+// Frontend-only for now (see BACKEND_INTEGRATION.md). Reads/writes the same
+// mock store the User-Dashboard's api/reservationApi.js uses conceptually —
+// in production both dashboards would hit the same `reservations` table, so
+// updateReservationStatus() here and cancelReservation() there are really the
+// same backend operation viewed from two roles (admin vs the reservation's
+// own user).
+export function getReservations() {
+  if (USE_REMOTE) {
+    // TODO(backend): SELECT * FROM reservations ORDER BY created_at DESC
+    throw new Error('Remote reservations API not implemented yet.')
+  }
+  return local(() => MOCK_RESERVATIONS)
+}
+
+export function getReservationById(id) {
+  if (USE_REMOTE) throw new Error('Remote reservations API not implemented yet.')
+  return local(() => getReservationByIdSync(id))
+}
+
+// status: one of RESERVATION_STATUS (config/adminStatus.js) — 'confirmed',
+// 'rejected', or 'cancelled' from this page's action buttons.
+export function updateReservationStatus(id, status) {
+  if (USE_REMOTE) {
+    // TODO(backend): UPDATE reservations SET status = $status WHERE id = $id
+    // (and, for 'confirmed'/'rejected'/'cancelled', mirror the change onto the
+    // lot's own status — see getLot()/updateLotStatus() above).
+    throw new Error('Remote reservations API not implemented yet.')
+  }
+  return local(() => {
+    const r = getReservationByIdSync(id)
+    if (!r) return null
+    r.status = status
+    r.updatedAt = new Date().toISOString()
+    return r
   })
 }
 

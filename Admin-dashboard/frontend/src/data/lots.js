@@ -48,7 +48,11 @@ export const BLOCK_DEFAULT = {
 export const BLOCK_OVERRIDES = {
   // Block 3 — 23 vacant + 21 reserve + 1 lamp (grey/white lot #s not legible in
   // the photo; add e.g. `32: vacant, 188: reserve, 158: lamp,` from the paper).
-  'block-3': {},
+  // A small, explicit set is seeded below so the frontend has real AVAILABLE
+  // lots to demo the reservation flow against — replace with the office's
+  // exact vacant lot numbers once they're transcribed from the paper plan.
+  // Kept identical to the User-Dashboard's data/lots.js seed.
+  'block-3': { 12: vacant, 45: vacant, 78: vacant, 133: vacant, 205: vacant },
   // Block 4 — many specials; couldn't fully count from the photo.
   'block-4': { 236: nfs },
   // Block 5 (Everlasting) — trees read from the plan (+ ~7 number-less, below).

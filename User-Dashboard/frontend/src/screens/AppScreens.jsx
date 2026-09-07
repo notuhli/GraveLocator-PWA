@@ -1,14 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import BottomNav from '../components/BottomNav'
 import { useMemorials, useBlocks } from '../hooks'
 import { useApp } from '../context/AppContext'
 import * as api from '../api'
 
 // ── MemorialsScreen ──────────────────────────────────────────────────────────
-export function MemorialsScreen({ onNavigate }) {
+export function MemorialsScreen({ onNavigate, onBack, modal }) {
   const { memorials, loading, reload } = useMemorials()
   const { blocks } = useBlocks()
-  const [creating, setCreating] = useState(false)
+  const creating = modal === 'create'
   const [fullName, setFullName] = useState('')
   const [birthDate, setBirthDate] = useState('')
   const [deathDate, setDeathDate] = useState('')
@@ -23,13 +23,17 @@ export function MemorialsScreen({ onNavigate }) {
     setBlockId(''); setLotNo(''); setTribute(''); setNotice('')
   }
 
+  useEffect(() => {
+    if (!creating) resetForm()
+  }, [creating])
+
   async function handlePublish() {
     if (!fullName) return
     setSubmitting(true)
     try {
       await api.createMemorial({ name: fullName, birthDate, deathDate, blockId, lotNo, quote: tribute })
       resetForm()
-      setCreating(false)
+      onBack('memorials')
       reload()
     } catch (err) {
       setNotice(err.message || 'Could not submit memorial. Please try again.')
@@ -41,7 +45,7 @@ export function MemorialsScreen({ onNavigate }) {
   if (creating) return (
     <div className="screen active" style={{ background:'var(--cream)' }}>
       <div className="hdr hdr-row" style={{ flexShrink:0 }}>
-        <button className="back-btn" onClick={() => { resetForm(); setCreating(false) }}>
+        <button className="back-btn" onClick={() => { resetForm(); onBack('memorials') }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
         <h2>Create Memorial</h2>
@@ -78,7 +82,7 @@ export function MemorialsScreen({ onNavigate }) {
     <div className="screen active" style={{ background:'var(--cream)' }}>
       <div className="hdr flex justify-between items-center" style={{ flexDirection:'row' }}>
         <h2>Digital Memorials</h2>
-        <button onClick={() => setCreating(true)} style={{ background:'rgba(255,255,255,.2)', border:'none', borderRadius:10, padding:'6px 14px', color:'#fff', fontFamily:'var(--ff-b)', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+        <button onClick={() => onNavigate('memorials', {}, { modal: 'create' })} style={{ background:'rgba(255,255,255,.2)', border:'none', borderRadius:10, padding:'6px 14px', color:'#fff', fontFamily:'var(--ff-b)', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create
         </button>
       </div>
@@ -117,6 +121,7 @@ export function MemorialsScreen({ onNavigate }) {
 const SETTINGS_GROUPS = [
   { label:'Account', items:[
     { id:'edit-profile', title:'Edit Profile', sub:'Name, email, phone', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+    { id:'my-reservations', title:'My Reservations', sub:'Track your lot reservations', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg> },
     { id:'manage-password', title:'Manage Password', sub:'Update your password', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> },
     { id:'notifications', title:'Notifications', sub:'Alerts and reminders', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg> },
   ]},
@@ -220,14 +225,16 @@ function ManagePasswordModal({ onClose }) {
   )
 }
 
-export function ProfileScreen({ onNavigate, onLogout }) {
+export function ProfileScreen({ onNavigate, onBack, onLogout, modal }) {
   const { user } = useApp()
   const profile = user || { name:'Maria Santos', email:'m.santos@email.com', phone:'+63 912 345 6789' }
-  const [openModal, setOpenModal] = useState(null) // 'edit-profile' | 'manage-password' | null
+  const openModal = modal || null
 
   function handleItemClick(id) {
     if (id === 'edit-profile' || id === 'manage-password') {
-      setOpenModal(id)
+      onNavigate('profile', {}, { modal: id })
+    } else if (id === 'my-reservations') {
+      onNavigate('my-reservations')
     }
     // 'notifications' / 'language' / 'theme': not built out yet — no-op for now.
   }
@@ -269,8 +276,8 @@ export function ProfileScreen({ onNavigate, onLogout }) {
       </div>
       <BottomNav active="profile" onNavigate={onNavigate} />
 
-      {openModal === 'edit-profile' && <EditProfileModal user={user} onClose={() => setOpenModal(null)} />}
-      {openModal === 'manage-password' && <ManagePasswordModal onClose={() => setOpenModal(null)} />}
+      {openModal === 'edit-profile' && <EditProfileModal user={user} onClose={() => onBack('profile')} />}
+      {openModal === 'manage-password' && <ManagePasswordModal onClose={() => onBack('profile')} />}
     </div>
   )
 }

@@ -79,6 +79,8 @@ body {
 .badge-unpaid { background: #FEE2E2; color: #DC2626; }
 .badge-approved { background: #DCFCE7; color: #16A34A; }
 .badge-featured { background: #FEF9C3; color: #B45309; }
+.badge-cancelled { background: var(--lgray); color: var(--dgray); }
+.badge-completed { background: #DBEAFE; color: #1D4ED8; }
 
 /* ── Card ── */
 .card {
@@ -409,6 +411,27 @@ tbody td { padding: 12px 14px; font-size: 13.5px; color: var(--charcoal); vertic
   .charts-row { grid-template-columns: 1fr; }
   .recent-table-wrap { grid-template-columns: 1fr; }
   .plot-layout { grid-template-columns: 1fr; }
+
+  /* Sidebar becomes an off-canvas drawer; topbar + main span the full width. */
+  .admin-sidebar { transform: translateX(-100%); transition: transform .22s ease; }
+  .admin-sidebar.open { transform: translateX(0); }
+  .admin-sidebar-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 150;
+  }
+  .admin-topbar { left: 0 !important; padding: 0 16px !important; }
+  .admin-menu-btn { display: flex !important; }
+  .admin-topbar input { width: 120px !important; }
+  .admin-main { margin-left: 0 !important; padding: 16px !important; }
+  .page-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-header > div:last-child { display: flex; }
+  .modal { width: 100%; padding: 22px; }
+  .modal-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-input, .filter-select { width: 100% !important; }
+  .action-cell { flex-wrap: wrap; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

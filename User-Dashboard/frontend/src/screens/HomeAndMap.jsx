@@ -19,12 +19,13 @@ export function HomeScreen({ onNavigate }) {
     { label: 'Find a Lot', screen: 'map', bg: 'rgba(45,80,22,.1)', icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2D5016" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> },
     { label: 'Block Directory', screen: 'search', bg: 'rgba(74,124,63,.1)', icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1.2" fill="#4A7C3F"/><circle cx="3.5" cy="12" r="1.2" fill="#4A7C3F"/><circle cx="3.5" cy="18" r="1.2" fill="#4A7C3F"/></svg> },
     { label: 'Digital Memorials', screen: 'memorials', bg: 'rgba(212,130,122,.1)', icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D4827A" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg> },
+    { label: 'My Reservations', screen: 'my-reservations', bg: 'rgba(201,168,76,.14)', icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg> },
   ]
 
   const lawns = blocks.filter(b => b.lawnName)
   const lotTotal = blocks.reduce((s, b) => s + (b.maxLot || 0), 0)
 
-  const openLawn = (b) => { setActiveBlockId(b.id); onNavigate('map') }
+  const openLawn = (b) => { setActiveBlockId(b.id); onNavigate('map', { blockId: b.id }) }
 
   return (
     <div className="screen active" style={{ background: 'var(--cream)' }}>
@@ -116,13 +117,17 @@ export function HomeScreen({ onNavigate }) {
 // Park view → tap a block → zoom into its lot grid → tap a lot → plot details.
 // Uses the shared ParkMap (same SVG as the intro) and LotGrid, both coloured by
 // the central status taxonomy. Deep-links from Search via context.activeBlockId.
-export function MapScreen({ onNavigate }) {
+export function MapScreen({ onNavigate, onBack, routeBlockId }) {
   const { blocks } = useBlocks()
   const { activeBlockId, setActiveBlockId, setActiveLot } = useApp()
   const [selected, setSelected] = useState(null)
   const [filter, setFilter] = useState('all')
 
   // Deep-link: if Search set a block, open straight into its grid.
+  useEffect(() => {
+    if (routeBlockId && routeBlockId !== activeBlockId) setActiveBlockId(routeBlockId)
+  }, [routeBlockId, activeBlockId, setActiveBlockId])
+
   useEffect(() => {
     if (activeBlockId && blocks.length) {
       const b = blocks.find(x => x.id === activeBlockId)
@@ -138,15 +143,20 @@ export function MapScreen({ onNavigate }) {
     return acc
   }, { __total: lots.length })
 
-  const openBlock = (b) => { setFilter('all'); setSelected(b) }
+  const openBlock = (b) => {
+    setFilter('all')
+    setActiveBlockId(b.id)
+    onNavigate('map', { blockId: b.id })
+  }
 
   const backToPark = () => {
     setSelected(null)
     setActiveBlockId(null)
+    onBack('map')
   }
 
   const openLot = (lot) => {
-    setActiveLot({
+    const activeLot = {
       blockId: selected.id,
       blockName: selected.name,
       lawnName: selected.lawnName,
@@ -154,8 +164,9 @@ export function MapScreen({ onNavigate }) {
       classification: lot.classification,
       status: lot.status,
       intermentCount: lot.intermentCount,
-    })
-    onNavigate('plotdetail')
+    }
+    setActiveLot(activeLot)
+    onNavigate('plotdetail', { activeLot })
   }
 
   // ── Lot-grid view ──────────────────────────────────────────────────────────
@@ -217,11 +228,7 @@ export function MapScreen({ onNavigate }) {
           />
         )}
       >
-        <div className="pm-rot">
-          <div className="pm-rot-inner">
-            <ParkMap interactive showPins={false} onSelectBlock={openBlock} activeBlockId={activeBlockId} />
-          </div>
-        </div>
+        <ParkMap interactive showPins={false} onSelectBlock={openBlock} activeBlockId={activeBlockId} />
       </MapViewport>
 
       <BottomNav active="map" onNavigate={onNavigate} />
