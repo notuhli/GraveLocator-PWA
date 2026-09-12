@@ -335,6 +335,21 @@ export function sendNotification(payload) {
   })
 }
 
+// Row shape from Supabase (snake_case) → the shape pages already expect
+// (camelCase, per BACKEND_INTEGRATION.md's data model — same mapper shape as
+// the User-Dashboard's reservationApi.js, since both read the same table).
+function reservationFromRow(row) {
+  return {
+    id: row.id, userId: row.user_id, applicantName: row.applicant_name,
+    email: row.email, contactNumber: row.contact_number,
+    blockId: row.block_id, blockName: row.block_name, lawnName: row.lawn_name,
+    lotId: row.lot_id, lotNo: row.lot_no, classification: row.classification,
+    price: row.price, reservationDate: row.reservation_date,
+    paymentOption: row.payment_option, notes: row.notes, status: row.status,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  }
+}
+
 // ── Reservations (admin view) ────────────────────────────────────────────────
 // Frontend-only for now (see BACKEND_INTEGRATION.md). Reads/writes the same
 // mock store the User-Dashboard's api/reservationApi.js uses conceptually —
@@ -344,14 +359,23 @@ export function sendNotification(payload) {
 // own user).
 export function getReservations() {
   if (USE_REMOTE) {
-    // TODO(backend): SELECT * FROM reservations ORDER BY created_at DESC
-    throw new Error('Remote reservations API not implemented yet.')
+    return (async () => {
+      const { data, error } = await supabase.from('reservations').select('*').order('created_at', { ascending: false })
+      if (error) throw error
+      return data.map(reservationFromRow)
+    })()
   }
   return local(() => MOCK_RESERVATIONS)
 }
 
 export function getReservationById(id) {
-  if (USE_REMOTE) throw new Error('Remote reservations API not implemented yet.')
+  if (USE_REMOTE) {
+    return (async () => {
+      const { data, error } = await supabase.from('reservations').select('*').eq('id', id).maybeSingle()
+      if (error) throw error
+      return data ? reservationFromRow(data) : null
+    })()
+  }
   return local(() => getReservationByIdSync(id))
 }
 
@@ -359,10 +383,17 @@ export function getReservationById(id) {
 // 'rejected', or 'cancelled' from this page's action buttons.
 export function updateReservationStatus(id, status) {
   if (USE_REMOTE) {
-    // TODO(backend): UPDATE reservations SET status = $status WHERE id = $id
-    // (and, for 'confirmed'/'rejected'/'cancelled', mirror the change onto the
-    // lot's own status — see getLot()/updateLotStatus() above).
-    throw new Error('Remote reservations API not implemented yet.')
+    return (async () => {
+      // Atomic on the database side: updates the reservation AND mirrors the
+      // change onto the lot's status (confirmed→sold, rejected/cancelled→
+      // available) in one transaction — see set_reservation_status in
+      // reservations-schema.sql.
+      const { data, error } = await supabase.rpc('set_reservation_status', {
+        p_reservation_id: id, p_status: status,
+      })
+      if (error) throw error
+      return reservationFromRow(data)
+    })()
   }
   return local(() => {
     const r = getReservationByIdSync(id)

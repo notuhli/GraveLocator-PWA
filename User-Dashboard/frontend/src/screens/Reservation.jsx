@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react'
 import BottomNav from '../components/BottomNav'
 import { useApp } from '../context/AppContext'
 import { useMyReservations, useReservation, usePricing } from '../hooks'
+import { ENV } from '../config/constants'
 import { PAYMENT_OPTIONS, reservationStatusLabel, reservationStatusBadge, RESERVATION_STATUS } from '../config/reservationStatus'
 import { peso } from '../utils/format'
 import * as api from '../api'
@@ -163,9 +164,11 @@ export function ReserveSummaryScreen({ onNavigate, onBack }) {
           ))}
         </div>
 
-        <div className="warn-box" style={{ marginBottom: 16 }}>
-          <p className="warn-txt">This is a frontend demo only — confirming below does not submit to a real database yet. The park office will contact you to finalize a real reservation.</p>
-        </div>
+        {!ENV.USE_REMOTE && (
+          <div className="warn-box" style={{ marginBottom: 16 }}>
+            <p className="warn-txt">This is a frontend demo only — confirming below does not submit to a real database yet. The park office will contact you to finalize a real reservation.</p>
+          </div>
+        )}
 
         {error && <p style={{ color: '#DC2626', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
         <div className="plot-actions">
@@ -190,7 +193,7 @@ export function ReserveSuccessScreen({ onNavigate }) {
         </div>
         <h2 style={{ fontFamily: 'var(--ff-d)', textAlign: 'center', margin: '0 0 8px' }}>Reservation Submitted</h2>
         <p className="f13 c-stone" style={{ textAlign: 'center', maxWidth: 280, margin: '0 0 20px' }}>
-          Your reservation is now pending review. This is a frontend demo — no data has been sent to a real database yet.
+          Your reservation is now pending review.{!ENV.USE_REMOTE && ' This is a frontend demo — no data has been sent to a real database yet.'}
         </p>
         {activeReservationId && (
           <div className="ref-box">

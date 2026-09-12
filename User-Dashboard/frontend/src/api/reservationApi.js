@@ -12,19 +12,48 @@
 // useReservation hooks.
 // ─────────────────────────────────────────────────────────────────────────────
 import { local, USE_REMOTE } from './client'
+import { supabase } from './supabaseClient'
 import { MOCK_RESERVATIONS, nextReservationId } from '../data/mockReservations'
 import { RESERVATION_STATUS } from '../config/reservationStatus'
 import { getLotsForBlock } from '../data/lots'
 import { getBlockById } from '../data/blocks'
 import { STATUS, isSellable } from '../config/status'
 
+// Row shape from Supabase (snake_case) → the shape screens already expect
+// (camelCase, per BACKEND_INTEGRATION.md's data model).
+function reservationFromRow(row) {
+  return {
+    id: row.id, userId: row.user_id, applicantName: row.applicant_name,
+    email: row.email, contactNumber: row.contact_number,
+    blockId: row.block_id, blockName: row.block_name, lawnName: row.lawn_name,
+    lotId: row.lot_id, lotNo: row.lot_no, classification: row.classification,
+    price: row.price, reservationDate: row.reservation_date,
+    paymentOption: row.payment_option, notes: row.notes, status: row.status,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  }
+}
+
 // payload: { userId, applicantName, email, contactNumber, blockId, lotNo,
 //            classification, price, reservationDate, paymentOption, notes }
 export async function createReservation(payload) {
   if (USE_REMOTE) {
-    // TODO(backend): INSERT into `reservations`, then UPDATE the lot's status
-    // to 'reserve_lot' in the same transaction / RPC so the two stay in sync.
-    throw new Error('Remote reservations API not implemented yet.')
+    // Atomic on the database side: inserts the reservation AND flips the lot
+    // to 'reserve_lot' in one transaction, re-checking availability with a
+    // row lock so two people can't reserve the same lot at once.
+    const { data, error } = await supabase.rpc('create_reservation', {
+      p_applicant_name: payload.applicantName,
+      p_email: payload.email,
+      p_contact_number: payload.contactNumber,
+      p_block_id: payload.blockId,
+      p_lot_no: Number(payload.lotNo),
+      p_classification: payload.classification || null,
+      p_price: payload.price ?? null,
+      p_reservation_date: payload.reservationDate,
+      p_payment_option: payload.paymentOption,
+      p_notes: payload.notes || '',
+    })
+    if (error) throw error
+    return reservationFromRow(data)
   }
 
   return local(() => {
@@ -70,12 +99,21 @@ export async function createReservation(payload) {
 }
 
 export async function getMyReservations(userId = 'local-demo-user') {
-  if (USE_REMOTE) throw new Error('Remote reservations API not implemented yet.')
+  if (USE_REMOTE) {
+    const { data, error } = await supabase
+      .from('reservations').select('*').eq('user_id', userId).order('created_at', { ascending: false })
+    if (error) throw error
+    return data.map(reservationFromRow)
+  }
   return local(() => MOCK_RESERVATIONS.filter((r) => r.userId === userId))
 }
 
 export async function getReservationById(id) {
-  if (USE_REMOTE) throw new Error('Remote reservations API not implemented yet.')
+  if (USE_REMOTE) {
+    const { data, error } = await supabase.from('reservations').select('*').eq('id', id).maybeSingle()
+    if (error) throw error
+    return data ? reservationFromRow(data) : null
+  }
   return local(() => MOCK_RESERVATIONS.find((r) => r.id === id) || null)
 }
 
@@ -83,7 +121,14 @@ export async function getReservationById(id) {
 // kept as its own function since a real backend will likely apply different
 // authorization rules to "user cancels their own" vs "admin changes status").
 export async function cancelReservation(id) {
-  if (USE_REMOTE) throw new Error('Remote reservations API not implemented yet.')
+  if (USE_REMOTE) {
+    // Atomic: cancels the reservation AND frees the lot back to 'available'
+    // in one transaction. Authorized by ownership (checked inside the RPC),
+    // not by admin role — see set_reservation_status for the admin path.
+    const { data, error } = await supabase.rpc('cancel_my_reservation', { p_reservation_id: id })
+    if (error) throw error
+    return reservationFromRow(data)
+  }
   return local(() => {
     const r = MOCK_RESERVATIONS.find((x) => x.id === id)
     if (!r) return null
