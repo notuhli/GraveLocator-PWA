@@ -31,7 +31,10 @@ function UpdateLotModal() {
   const [blockId, setBlockId] = useState('')
   const [lotNo, setLotNo] = useState('')
   const [status, setStatus] = useState(STATUS.AVAILABLE)
+  const [intermentCount, setIntermentCount] = useState(1)
   const [saving, setSaving] = useState(false)
+
+  const needsIntermentCount = status === STATUS.WITH_INTERMENT
 
   useEffect(() => { api.getBlocks().then(setBlocks) }, [])
   useEffect(() => {
@@ -39,6 +42,9 @@ function UpdateLotModal() {
     setBlockId(record?.blockId || '')
     setLotNo(record?.lotNo ?? '')
     setStatus(record?.status || STATUS.AVAILABLE)
+    // Default to the lot's existing count when it already has interments,
+    // otherwise start at 1 (about to record the first burial).
+    setIntermentCount(record?.intermentCount > 0 ? record.intermentCount : 1)
   }, [isOpen, record])
 
   if (!isOpen) return null
@@ -46,9 +52,10 @@ function UpdateLotModal() {
 
   const submit = async () => {
     if (!blockId || !lotNo) return
+    if (needsIntermentCount && (!intermentCount || Number(intermentCount) < 1)) return
     setSaving(true)
     try {
-      await api.updateLotStatus(blockId, Number(lotNo), status)
+      await api.updateLotStatus(blockId, Number(lotNo), status, needsIntermentCount ? intermentCount : undefined)
       closeModal()
     } finally {
       setSaving(false)
@@ -79,9 +86,28 @@ function UpdateLotModal() {
             {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
           </select>
         </div>
+        {needsIntermentCount && (
+          <div className="modal-field">
+            <label>Number of Interments</label>
+            <input
+              type="number"
+              min="1"
+              placeholder="e.g. 1"
+              value={intermentCount}
+              onChange={e => setIntermentCount(e.target.value)}
+            />
+            <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
+              How many people are buried in this lot.
+            </p>
+          </div>
+        )}
         <div className="modal-actions">
           <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={saving || !blockId || !lotNo}>
+          <button
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={saving || !blockId || !lotNo || (needsIntermentCount && (!intermentCount || Number(intermentCount) < 1))}
+          >
             {saving ? 'Saving…' : 'Save Status'}
           </button>
         </div>

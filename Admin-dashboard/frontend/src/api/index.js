@@ -85,12 +85,17 @@ export async function getLot(blockId, lotNo) {
 }
 
 // Admin-only: change a lot's map status directly (e.g. marking it sold).
+// `intermentCount` is optional — pass it when status === STATUS.WITH_INTERMENT
+// so the number of burials in the lot is recorded alongside the status.
 // Requires the signed-in Supabase user to have profiles.role = 'admin' (RLS).
-export async function updateLotStatus(blockId, lotNo, status) {
+export async function updateLotStatus(blockId, lotNo, status, intermentCount) {
+  const patch = { status }
+  if (intermentCount != null) patch.interment_count = Number(intermentCount)
+
   if (USE_REMOTE) {
     const { data, error } = await supabase
       .from('lots')
-      .update({ status })
+      .update(patch)
       .eq('block_id', blockId)
       .eq('lot_no', Number(lotNo))
       .select()
@@ -103,7 +108,10 @@ export async function updateLotStatus(blockId, lotNo, status) {
   return local(() => {
     const lots = getLotsForBlock(blockId)
     const lot = lots.find((l) => l.lotNo === Number(lotNo))
-    if (lot) lot.status = status
+    if (lot) {
+      lot.status = status
+      if (intermentCount != null) lot.intermentCount = Number(intermentCount)
+    }
     return lot || null
   })
 }
