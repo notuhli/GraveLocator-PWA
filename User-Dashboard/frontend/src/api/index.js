@@ -3,14 +3,13 @@
 // Each function currently delegates to local seed data via the client; swapping
 // to a real backend is a one-line change per function inside this file.
 // ─────────────────────────────────────────────────────────────────────────────
-import { local, request, USE_REMOTE } from './client'
+import { local, USE_REMOTE } from './client'
 import { supabase } from './supabaseClient'
 import { BLOCKS, PARK_MAP, getBlockById } from '../data/blocks'
 import { getLotsForBlock } from '../data/lots'
 import { PRICING, CASH_PRICING, INSTALLMENT_FACTORS, INTERMENT_FEES, PRICING_NOTES } from '../data/pricing'
 import { INSTALLMENT_INTEREST } from '../config/constants'
 import { LEGEND } from '../data/legend'
-import { MEMORIALS } from '../data/memorials'
 import { createReservation, getMyReservations, getReservationById, cancelReservation } from './reservationApi'
 
 // Row shape from Supabase (snake_case) → the shape screens already expect (camelCase).
@@ -21,6 +20,8 @@ function blockFromRow(row) {
     classifications: row.classifications, subAreas: row.sub_areas || undefined,
     batches: row.batches || undefined, counts: row.counts || undefined,
     label: { x: row.label_x, y: row.label_y }, hotspot: row.hotspot,
+    // GPS pin: use DB lat/lng columns if present, else fall back to the seed.
+    coords: row.lat != null && row.lng != null ? [row.lat, row.lng] : getBlockById(row.id)?.coords,
   }
 }
 function lotFromRow(row) {
@@ -34,8 +35,12 @@ function memorialFromRow(row) {
   return {
     id: row.id, emoji: row.emoji, name: row.name, dates: row.dates,
     quote: row.quote, likes: row.likes, comments: row.comments,
+    status: row.status || 'pending', userId: row.user_id,
   }
 }
+
+// Local (mock) mode: memorials created this session, per user. Not persisted.
+const localMemorials = []
 
 // ── Site / blocks ────────────────────────────────────────────────────────────
 export function getSite() {
@@ -102,23 +107,26 @@ export function getLegend() {
   return local(() => LEGEND)
 }
 
-// ── Memorials ────────────────────────────────────────────────────────────────
-// Public feed only ever shows approved/featured submissions — new ones start
-// 'pending' until an admin reviews them in the Moderation Queue.
-export async function getMemorials() {
+// ── Memorials (PRIVATE) ──────────────────────────────────────────────────────
+// Each user only ever sees the memorials THEY created (any status, so they can
+// see "Pending review" too). Enforced in the database by RLS (see
+// supabase/memorials-private.sql); the user_id filter here is a second guard.
+export async function getMemorials(userId) {
   if (USE_REMOTE) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return []
     const { data, error } = await supabase
       .from('memorials')
       .select('*')
-      .in('status', ['approved', 'featured'])
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (error) throw error
     return data.map(memorialFromRow)
   }
-  return local(() => MEMORIALS)
+  return local(() => localMemorials.filter((m) => m.userId === (userId || 'local-user')))
 }
 
-// payload: { name, birthDate, deathDate, blockId, lotNo, quote }
+// payload: { name, birthDate, deathDate, blockId, lotNo, quote, userId }
 export async function createMemorial(payload) {
   const { name, birthDate, deathDate, blockId, lotNo, quote } = payload
   const birthYear = birthDate ? birthDate.slice(0, 4) : '?'
@@ -145,8 +153,15 @@ export async function createMemorial(payload) {
     if (error) throw error
     return memorialFromRow(data)
   }
-  // Local stub: echo back with a generated id (no persistence yet).
-  return local(() => ({ id: `mem-${Date.now()}`, name, dates, quote, emoji: '🕊️', likes: 0, comments: 0 }))
+  // Local stub: keep it in memory for this session, owned by this user only.
+  return local(() => {
+    const m = {
+      id: `mem-${Date.now()}`, name, dates, quote, emoji: '🕊️', likes: 0, comments: 0,
+      status: 'pending', userId: payload.userId || 'local-user',
+    }
+    localMemorials.unshift(m)
+    return m
+  })
 }
 
 // ── Auth (Supabase Auth — only active when USE_REMOTE is on) ────────────────
@@ -212,6 +227,24 @@ export async function getCurrentSession() {
   const { data, error } = await supabase.auth.getSession()
   if (error) throw error
   return data.session
+}
+
+// ── Forgot password (email + 6-digit code) ───────────────────────────────────
+// Step 1: email the user a recovery code. Requires the Supabase "Reset Password"
+// email template to include {{ .Token }}.
+export async function requestPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim())
+  if (error) throw error
+}
+
+// Step 2: check the code (this signs the user in) and set the new password.
+export async function resetPasswordWithCode(email, token, newPassword) {
+  const { error: verifyError } = await supabase.auth.verifyOtp({
+    email: email.trim(), token: token.trim(), type: 'recovery',
+  })
+  if (verifyError) throw verifyError
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw error
 }
 
 // ── Reservations — re-exported so screens only ever import from api/ ────────

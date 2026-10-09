@@ -26,7 +26,7 @@ export default function LoginScreen() {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
-      background: 'linear-gradient(135deg,#1E3A0F 0%,#3A6B2F 50%,#5A9E4A 100%)',
+      background: 'linear-gradient(135deg,#082F49 0%,#0369A1 50%,#0EA5E9 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center'
     }}>
       <div style={{
@@ -35,7 +35,7 @@ export default function LoginScreen() {
       }}>
         {/* Left panel */}
         <div style={{
-          flex: 1, background: 'linear-gradient(160deg,rgba(30,58,15,.95),rgba(58,107,47,.9))',
+          flex: 1, background: 'linear-gradient(160deg,rgba(8,47,73,.95),rgba(3,105,161,.9))',
           padding: '60px 48px', display: 'flex', flexDirection: 'column', justifyContent: 'center',
           position: 'relative', overflow: 'hidden'
         }}>
@@ -86,7 +86,7 @@ export default function LoginScreen() {
               style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid var(--lgray)', fontFamily: 'var(--ff-b)', fontSize: 14, color: 'var(--charcoal)', outline: 'none' }}
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="admin@calbayog.gov.ph"
+              placeholder="admin email address"
               type="email"
             />
           </div>
@@ -108,10 +108,6 @@ export default function LoginScreen() {
             <input type="checkbox" style={{ width: 16, height: 16, accentColor: 'var(--sage)' }}/>
             <span style={{ fontSize: 13, color: 'var(--dgray)' }}>Enable two-factor authentication</span>
           </div>
-
-          <span style={{ fontSize: 13, color: 'var(--sage)', cursor: 'pointer', marginBottom: 24, display: 'block' }}>
-            Forgot your password?
-          </span>
 
           {(localError || authError) && (
             <p style={{ color: '#DC2626', fontSize: 13, marginBottom: 16 }}>{localError || authError}</p>

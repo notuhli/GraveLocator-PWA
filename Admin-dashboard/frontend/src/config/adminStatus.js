@@ -6,13 +6,25 @@
 // status changes independently of a user's account status.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Account activity status — computed from real data (see getUsers in api/index.js):
+//   online     → app open right now (seen in the last 5 minutes)
+//   active     → used the app / signed in within the last 30 days
+//   inactive   → no activity for 30+ days (or never signed in)
+//   unverified → signed up but never confirmed their email
+//   suspended  → banned/blocked in Supabase Auth
 export const USER_STATUS = {
-  ACTIVE:   'active',
-  INACTIVE: 'inactive',
+  ONLINE:     'online',
+  ACTIVE:     'active',
+  INACTIVE:   'inactive',
+  UNVERIFIED: 'unverified',
+  SUSPENDED:  'suspended',
 }
 export const USER_STATUS_META = {
-  [USER_STATUS.ACTIVE]:   { label: 'Active',   badge: 'badge-active' },
-  [USER_STATUS.INACTIVE]: { label: 'Inactive', badge: 'badge-inactive' },
+  [USER_STATUS.ONLINE]:     { label: 'Online',     badge: 'badge-online' },
+  [USER_STATUS.ACTIVE]:     { label: 'Active',     badge: 'badge-active' },
+  [USER_STATUS.INACTIVE]:   { label: 'Inactive',   badge: 'badge-inactive' },
+  [USER_STATUS.UNVERIFIED]: { label: 'Unverified', badge: 'badge-pending' },
+  [USER_STATUS.SUSPENDED]:  { label: 'Suspended',  badge: 'badge-rejected' },
 }
 
 export const MEMORIAL_STATUS = {

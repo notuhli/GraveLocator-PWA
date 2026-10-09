@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import ParkMap from '../components/ParkMap'
+import { useState, useEffect } from 'react'
+import SiteMap from '../components/SiteMap'
 import LotGrid from '../components/LotGrid'
 import StatusFilter from '../components/StatusFilter'
 import MapLegend from '../components/MapLegend'
@@ -10,12 +10,18 @@ import { intermentMarks } from '../utils/format'
 import { plotLabel } from '../utils/plot'
 
 export default function PlotsPage() {
-  const { openModal } = useAdmin()
+  const { openModal, plotBlockId: blockId, openPlotBlock, closePlotBlock } = useAdmin()
   const { blocks } = useBlocks()
-  const [blockId, setBlockId] = useState(null)
   const [filter, setFilter] = useState('all')
   const [selectedLot, setSelectedLot] = useState(null)
   const { lots } = useLots(blockId)
+
+  // Keep the side panel in sync after "Update Status" / "Mark Sold" saves.
+  useEffect(() => {
+    if (!selectedLot) return
+    const fresh = lots.find((l) => l.lotNo === selectedLot.lotNo)
+    if (fresh && (fresh.status !== selectedLot.status || fresh.intermentCount !== selectedLot.intermentCount)) setSelectedLot({ ...selectedLot, ...fresh })
+  }, [lots, selectedLot])
 
   const block = blocks.find((b) => b.id === blockId) || null
 
@@ -24,7 +30,7 @@ export default function PlotsPage() {
   lots.forEach((l) => { counts[l.status] = (counts[l.status] || 0) + 1 })
 
   const pickBlock = (b) => {
-    setBlockId(b.id)
+    openPlotBlock(b.id)
     setSelectedLot(null)
     setFilter('all')
   }
@@ -48,16 +54,16 @@ export default function PlotsPage() {
           {!block ? (
             <>
               <div className="map-toolbar">
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dgray)' }}>Cemetery Map · Calbayog City — tap a block to open it</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dgray)' }}>Cemetery Map · Calbayog City — tap a red pin, then “View lots”</span>
               </div>
-              <div style={{ padding: 16 }}>
-                <ParkMap interactive onSelectBlock={pickBlock} />
+              <div className="admin-sitemap">
+                <SiteMap blocks={blocks} onSelectBlock={pickBlock} />
               </div>
             </>
           ) : (
             <>
               <div className="map-toolbar">
-                <button className="btn btn-ghost btn-sm" onClick={() => { setBlockId(null); setSelectedLot(null) }}>← All Blocks</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { closePlotBlock(); setSelectedLot(null) }}>← All Blocks</button>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--charcoal)', marginLeft: 8 }}>
                   {block.name}{block.lawnName ? ` — ${block.lawnName}` : ''}
                 </span>

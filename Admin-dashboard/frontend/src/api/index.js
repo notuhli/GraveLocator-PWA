@@ -6,7 +6,7 @@
 // data/blocks.js, data/lots.js, data/pricing.js, and config/status.js, a single
 // backend can serve identical block/lot/pricing/status data to both.
 // ─────────────────────────────────────────────────────────────────────────────
-import { local, USE_REMOTE } from './client'
+import { local, USE_REMOTE, emitDataChange } from './client'
 import { supabase } from './supabaseClient'
 import { BLOCKS, PARK_MAP, getBlockById } from '../data/blocks'
 import { getLotsForBlock } from '../data/lots'
@@ -20,7 +20,25 @@ import { MEMORIAL_QUEUE, getMemorialQueueById } from '../data/memorialModeration
 import { SENT_NOTIFICATIONS, NOTIFICATION_STATS, SYSTEM_ALERTS } from '../data/notifications'
 import { computeDashboardMetrics, computeBlockOccupancy } from '../data/dashboardMetrics'
 import { MOCK_RESERVATIONS, getReservationByIdSync } from '../data/mockReservations'
+import { PARK } from '../config/constants'
 import { STATUS } from '../config/status'
+
+// Supabase returns NO error when Row Level Security blocks a delete/update —
+// it just affects 0 rows. Always .select() the changed rows and call this so
+// a blocked change shows an error instead of "working" until you refresh.
+function assertChanged(data, what) {
+  if (!data || (Array.isArray(data) && data.length === 0)) {
+    throw new Error(`The database didn't ${what}. Your account may not have admin permission — run supabase/admin_access.sql and make sure your profiles.role is 'admin'.`)
+  }
+  return Array.isArray(data) ? data[0] : data
+}
+
+// Runs a mutation, then tells every data hook to refresh.
+async function mutate(fn) {
+  const result = await fn()
+  emitDataChange()
+  return result
+}
 
 // Row shape from Supabase (snake_case) → the shape pages already expect (camelCase).
 function blockFromRow(row) {
@@ -30,6 +48,8 @@ function blockFromRow(row) {
     classifications: row.classifications, subAreas: row.sub_areas || undefined,
     batches: row.batches || undefined, counts: row.counts || undefined,
     label: { x: row.label_x, y: row.label_y }, hotspot: row.hotspot,
+    // GPS pin: use DB lat/lng columns if present, else fall back to the seed.
+    coords: row.lat != null && row.lng != null ? [row.lat, row.lng] : getBlockById(row.id)?.coords,
   }
 }
 function lotFromRow(row) {
@@ -88,7 +108,8 @@ export async function getLot(blockId, lotNo) {
 // `intermentCount` is optional — pass it when status === STATUS.WITH_INTERMENT
 // so the number of burials in the lot is recorded alongside the status.
 // Requires the signed-in Supabase user to have profiles.role = 'admin' (RLS).
-export async function updateLotStatus(blockId, lotNo, status, intermentCount) {
+export function updateLotStatus(blockId, lotNo, status, intermentCount) {
+  return mutate(async () => {
   const patch = { status }
   if (intermentCount != null) patch.interment_count = Number(intermentCount)
 
@@ -99,9 +120,8 @@ export async function updateLotStatus(blockId, lotNo, status, intermentCount) {
       .eq('block_id', blockId)
       .eq('lot_no', Number(lotNo))
       .select()
-      .single()
     if (error) throw error
-    return lotFromRow(data)
+    return lotFromRow(assertChanged(data, 'update this lot'))
   }
   // Local stub: mutate the cached in-memory lot so the UI reflects the change
   // for this session (no persistence yet — same caveat as createMemorial below).
@@ -113,6 +133,7 @@ export async function updateLotStatus(blockId, lotNo, status, intermentCount) {
       if (intermentCount != null) lot.intermentCount = Number(intermentCount)
     }
     return lot || null
+  })
   })
 }
 
@@ -193,27 +214,61 @@ export function getBlockOccupancy() {
   return local(() => computeBlockOccupancy())
 }
 
-// ── Site users (public app customers) ────────────────────────────────────────
+// ── Users (with REAL activity status) ────────────────────────────────────────
+// Uses the admin-only SQL function admin_list_users() (see
+// supabase/user-activity.sql), which adds last sign-in, last seen and email
+// confirmation from Supabase Auth. Falls back to plain profiles if the
+// function hasn't been created yet.
+const ONLINE_MS = 5 * 60 * 1000            // seen in the last 5 minutes
+const ACTIVE_MS = 30 * 24 * 60 * 60 * 1000 // activity in the last 30 days
+
+function userStatus({ lastSeenAt, lastSignInAt, emailConfirmedAt, bannedUntil }) {
+  const now = Date.now()
+  const t = (v) => (v ? new Date(v).getTime() : 0)
+  if (t(bannedUntil) > now) return 'suspended'
+  if (now - t(lastSeenAt) < ONLINE_MS) return 'online'
+  if (!emailConfirmedAt && !lastSignInAt) return 'unverified'
+  const lastActive = Math.max(t(lastSeenAt), t(lastSignInAt))
+  return lastActive && now - lastActive < ACTIVE_MS ? 'active' : 'inactive'
+}
+
 export async function getUsers() {
   if (USE_REMOTE) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, full_name, email, phone, created_at')
-      .order('created_at', { ascending: false })
-    if (error) throw error
-    return data.map((row) => ({
-      id: row.id,
-      name: row.full_name || '(no name set)',
-      email: row.email,
-      phone: row.phone || '',
-      // Plot ownership isn't tracked yet (would need a user_id column on
-      // `lots`), so this always shows empty for now rather than fake data.
-      plots: [],
-      joined: row.created_at,
-      // Account activation/deactivation isn't built yet — everyone reads as
-      // active until that feature exists.
-      status: 'active',
-    }))
+    const rpc = await supabase.rpc('admin_list_users')
+    let rows = rpc.data
+    let hasActivity = !rpc.error
+    if (rpc.error) {
+      // Function not installed yet (or not admin) — fall back to profiles only.
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, phone, role, created_at')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      rows = data
+    }
+    return rows.map((row) => {
+      const lastActive = [row.last_seen_at, row.last_sign_in_at].filter(Boolean).sort().pop() || null
+      return {
+        id: row.id,
+        name: row.full_name || '(no name set)',
+        email: row.email,
+        phone: row.phone || '',
+        role: row.role || 'user',
+        // Plot ownership isn't tracked yet (would need a user_id column on
+        // `lots`), so this always shows empty for now rather than fake data.
+        plots: [],
+        joined: row.created_at ? String(row.created_at).slice(0, 10) : null,
+        lastActive,
+        status: hasActivity
+          ? userStatus({
+              lastSeenAt: row.last_seen_at,
+              lastSignInAt: row.last_sign_in_at,
+              emailConfirmedAt: row.email_confirmed_at,
+              bannedUntil: row.banned_until,
+            })
+          : 'active',
+      }
+    })
   }
   return local(() => USERS)
 }
@@ -224,26 +279,50 @@ export async function getUsers() {
 // for real would need a small backend endpoint or Supabase Edge Function,
 // not a direct call from the browser.
 export function createUser(payload) {
-  return local(() => {
-    const rec = { id: `usr-${Date.now()}`, plots: [], ...payload }
-    USERS.unshift(rec)
-    return rec
+  return mutate(async () => {
+    if (USE_REMOTE) {
+      // A real account needs Supabase Auth + the service_role key (server only).
+      throw new Error('New accounts are created when users sign up in the app. Adding them here needs a server function.')
+    }
+    return local(() => {
+      const rec = { id: `usr-${Date.now()}`, plots: [], joined: new Date().toISOString().slice(0, 10), ...payload }
+      USERS.unshift(rec)
+      return rec
+    })
   })
 }
 
 export function updateUser(id, patch) {
-  return local(() => {
-    const u = getUserById(id)
-    if (u) Object.assign(u, patch)
-    return u
+  return mutate(async () => {
+    if (USE_REMOTE) {
+      const { data, error } = await supabase.from('profiles')
+        .update({ full_name: patch.name, phone: patch.phone }).eq('id', id).select()
+      if (error) throw error
+      assertChanged(data, 'save this user')
+      return { id, ...patch }
+    }
+    return local(() => {
+      const u = getUserById(id)
+      if (u) Object.assign(u, patch)
+      return u
+    })
   })
 }
 
 export function deleteUser(id) {
-  return local(() => {
-    const idx = USERS.findIndex((u) => u.id === id)
-    if (idx >= 0) USERS.splice(idx, 1)
-    return { id }
+  return mutate(async () => {
+    if (USE_REMOTE) {
+      // Deletes the login (auth.users) and profile together, via a
+      // security-definer function that checks the caller is an admin.
+      const { error } = await supabase.rpc('admin_delete_user', { p_user_id: id })
+      if (error) throw error
+      return { id }
+    }
+    return local(() => {
+      const idx = USERS.findIndex((u) => u.id === id)
+      if (idx >= 0) USERS.splice(idx, 1)
+      return { id }
+    })
   })
 }
 
@@ -254,19 +333,19 @@ export function getAdminStaff() {
 }
 
 export function addAdminStaff(payload) {
-  return local(() => {
+  return mutate(() => local(() => {
     const rec = { id: `admin-${Date.now()}`, avatar: (payload.name || '?')[0].toUpperCase(), ...payload }
     ADMIN_STAFF.push(rec)
     return rec
-  })
+  }))
 }
 
 export function removeAdminStaff(id) {
-  return local(() => {
+  return mutate(() => local(() => {
     const idx = ADMIN_STAFF.findIndex((a) => a.id === id)
     if (idx >= 0) ADMIN_STAFF.splice(idx, 1)
     return { id }
-  })
+  }))
 }
 
 // ── Memorials — public feed + admin moderation queue ─────────────────────────
@@ -279,14 +358,26 @@ export async function getMemorials() {
   return local(() => MEMORIALS)
 }
 
-export async function createMemorial(payload) {
+export function createMemorial(payload) {
+  return mutate(() => createMemorialRaw(payload))
+}
+async function createMemorialRaw(payload) {
   if (USE_REMOTE) {
     // Admin-added memorials skip moderation — the admin adding it IS the moderator.
     const { data, error } = await supabase.from('memorials').insert({ ...payload, status: 'approved' }).select().single()
     if (error) throw error
     return data
   }
-  return local(() => ({ id: `mem-${Date.now()}`, ...payload }))
+  // Local stub: also add it to the moderation queue so it shows in the table.
+  return local(() => {
+    const rec = {
+      id: `modq-${Date.now()}`, name: payload.name, submittedBy: payload.submitted_by || 'Admin',
+      blockId: payload.block_id, lotNo: payload.lot_no, birth: payload.birth_date, death: payload.death_date,
+      quote: payload.quote || '', submitted: new Date().toISOString().slice(0, 10), status: 'approved',
+    }
+    MEMORIAL_QUEUE.unshift(rec)
+    return rec
+  })
 }
 
 function queueRowFromMemorial(row) {
@@ -298,6 +389,7 @@ function queueRowFromMemorial(row) {
     lotNo: row.lot_no,
     birth: row.birth_date,
     death: row.death_date,
+    quote: row.quote || '',
     submitted: row.created_at,
     status: row.status,
   }
@@ -315,11 +407,14 @@ export function getMemorialQueue() {
 }
 
 export function updateMemorialQueueStatus(id, status) {
+  return mutate(() => updateMemorialQueueStatusRaw(id, status))
+}
+function updateMemorialQueueStatusRaw(id, status) {
   if (USE_REMOTE) {
     return (async () => {
-      const { data, error } = await supabase.from('memorials').update({ status }).eq('id', id).select().single()
+      const { data, error } = await supabase.from('memorials').update({ status }).eq('id', id).select()
       if (error) throw error
-      return queueRowFromMemorial(data)
+      return queueRowFromMemorial(assertChanged(data, 'update this memorial'))
     })()
   }
   return local(() => {
@@ -329,18 +424,74 @@ export function updateMemorialQueueStatus(id, status) {
   })
 }
 
+// patch: { name, birth, death, blockId, lotNo, quote, status }
+export function updateMemorial(id, patch) {
+  return mutate(async () => {
+    if (USE_REMOTE) {
+      const { data, error } = await supabase.from('memorials').update({
+        name: patch.name, quote: patch.quote, status: patch.status,
+        birth_date: patch.birth || null, death_date: patch.death || null,
+        block_id: patch.blockId || null, lot_no: patch.lotNo ? Number(patch.lotNo) : null,
+      }).eq('id', id).select()
+      if (error) throw error
+      return queueRowFromMemorial(assertChanged(data, 'save this memorial'))
+    }
+    return local(() => {
+      const m = getMemorialQueueById(id)
+      if (m) Object.assign(m, { ...patch, lotNo: patch.lotNo ? Number(patch.lotNo) : null })
+      return m
+    })
+  })
+}
+
+export function deleteMemorial(id) {
+  return mutate(async () => {
+    if (USE_REMOTE) {
+      const { data, error } = await supabase.from('memorials').delete().eq('id', id).select('id')
+      if (error) throw error
+      assertChanged(data, 'delete this memorial')
+      return { id }
+    }
+    return local(() => {
+      const idx = MEMORIAL_QUEUE.findIndex((m) => m.id === id)
+      if (idx >= 0) MEMORIAL_QUEUE.splice(idx, 1)
+      return { id }
+    })
+  })
+}
+
+// ── Settings (saved on this device until a settings table exists) ───────────
+const SETTINGS_KEY = 'gl-admin:settings'
+const DEFAULT_SETTINGS = {
+  cemeteryName: PARK.name, address: PARK.address, contactNumber: PARK.tel, tagline: PARK.tagline,
+  emailNotifications: true, smsNotifications: true, memorialAlerts: true, newUserAlerts: true, systemAlerts: false,
+}
+export function getSettings() {
+  return local(() => {
+    try { return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) } }
+    catch { return { ...DEFAULT_SETTINGS } }
+  })
+}
+export function saveSettings(settings) {
+  return mutate(() => local(() => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+    return settings
+  }))
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 export function getNotifications() {
   // NOTE: not yet wired to Supabase.
   return local(() => ({ sent: SENT_NOTIFICATIONS, stats: NOTIFICATION_STATS, alerts: SYSTEM_ALERTS }))
 }
 
+// payload: { title, body, recipients, scheduledFor? }
 export function sendNotification(payload) {
-  return local(() => {
+  return mutate(() => local(() => {
     const rec = { id: `notif-${Date.now()}`, unread: true, sentAt: new Date().toISOString(), ...payload }
     SENT_NOTIFICATIONS.unshift(rec)
     return rec
-  })
+  }))
 }
 
 // Row shape from Supabase (snake_case) → the shape pages already expect
@@ -390,6 +541,9 @@ export function getReservationById(id) {
 // status: one of RESERVATION_STATUS (config/adminStatus.js) — 'confirmed',
 // 'rejected', or 'cancelled' from this page's action buttons.
 export function updateReservationStatus(id, status) {
+  return mutate(() => updateReservationStatusRaw(id, status))
+}
+function updateReservationStatusRaw(id, status) {
   if (USE_REMOTE) {
     return (async () => {
       // Atomic on the database side: updates the reservation AND mirrors the
@@ -409,6 +563,113 @@ export function updateReservationStatus(id, status) {
     r.status = status
     r.updatedAt = new Date().toISOString()
     return r
+  })
+}
+
+// Deletes the reservation record. A pending/confirmed one is cancelled first
+// so its lot is released back to available before the row disappears.
+export function deleteReservation(id) {
+  return mutate(async () => {
+    if (USE_REMOTE) {
+      const { data: row, error: readErr } = await supabase.from('reservations').select('status').eq('id', id).maybeSingle()
+      if (readErr) throw readErr
+      if (row && ['pending', 'confirmed'].includes(row.status)) {
+        const { error: rpcErr } = await supabase.rpc('set_reservation_status', { p_reservation_id: id, p_status: 'cancelled' })
+        if (rpcErr) throw rpcErr
+      }
+      const { data, error } = await supabase.from('reservations').delete().eq('id', id).select('id')
+      if (error) throw error
+      assertChanged(data, 'delete this reservation')
+      return { id }
+    }
+    return local(() => {
+      const idx = MOCK_RESERVATIONS.findIndex((r) => r.id === id)
+      if (idx >= 0) MOCK_RESERVATIONS.splice(idx, 1)
+      return { id }
+    })
+  })
+}
+
+// ── Reports: paid payments + monthly income ──────────────────────────────────
+// A "paid payment" is money actually received:
+//   1. Reservation initial payment (full cash payment or installment down
+//      payment) — counted once it has a received date (due_now_received_on)
+//      or its payment_status is 'verified'. Rejected/cancelled reservations
+//      are skipped.
+//   2. Installment payments (installment_payments table) with status 'verified'.
+// Each item: { id, date:'YYYY-MM-DD', payer, plot, type, method, amount, source }
+const RES_EXCLUDED = ['rejected', 'cancelled']
+
+function reservationPayment(r) {
+  const received = r.due_now_received_on
+    || (r.payment_status === 'verified' ? String(r.updated_at || r.created_at || '').slice(0, 10) : null)
+  if (!received || RES_EXCLUDED.includes(r.status)) return null
+  const isInstallment = r.payment_option === 'installment'
+  const amount = Number(r.due_now_amount ?? (isInstallment ? r.down_payment : r.price)) || 0
+  if (amount <= 0) return null
+  return {
+    id: `res-${r.id}`,
+    date: received,
+    payer: r.applicant_name || '—',
+    plot: [r.block_name, r.lot_no != null ? `Lot ${r.lot_no}` : null].filter(Boolean).join(' · ') || '—',
+    type: isInstallment ? 'Down payment' : 'Full payment',
+    method: r.payment_method || (r.payment_option === 'gcash' ? 'gcash' : 'cash'),
+    amount,
+    source: 'reservation',
+  }
+}
+
+export async function getPaidPayments() {
+  if (USE_REMOTE) {
+    const [resQ, instQ] = await Promise.all([
+      supabase.from('reservations').select(
+        'id, applicant_name, block_name, lot_no, price, payment_option, payment_method, payment_status, status, down_payment, due_now_amount, due_now_received_on, created_at, updated_at',
+      ),
+      supabase.from('installment_payments').select('id, reservation_id, kind, amount, method, paid_on, status').eq('status', 'verified'),
+    ])
+    if (resQ.error) throw resQ.error
+    const reservations = resQ.data || []
+    const byId = Object.fromEntries(reservations.map((r) => [r.id, r]))
+
+    const payments = reservations.map(reservationPayment).filter(Boolean)
+    const warnings = []
+    if (instQ.error) {
+      warnings.push(`Installment payments could not be loaded (${instQ.error.message}).`)
+    } else {
+      for (const p of instQ.data || []) {
+        const r = byId[p.reservation_id] || {}
+        payments.push({
+          id: `inst-${p.id}`,
+          date: String(p.paid_on).slice(0, 10),
+          payer: r.applicant_name || '—',
+          plot: [r.block_name, r.lot_no != null ? `Lot ${r.lot_no}` : null].filter(Boolean).join(' · ') || '—',
+          type: p.kind === 'adjustment' ? 'Adjustment' : 'Monthly installment',
+          method: p.method || 'cash',
+          amount: Number(p.amount) || 0,
+          source: 'installment',
+        })
+      }
+    }
+    payments.sort((a, b) => b.date.localeCompare(a.date))
+    return { payments, warnings }
+  }
+
+  // Local mock mode: treat confirmed/completed mock reservations as paid in full.
+  return local(() => {
+    const payments = MOCK_RESERVATIONS
+      .filter((r) => ['confirmed', 'completed'].includes(r.status))
+      .map((r) => ({
+        id: `res-${r.id}`,
+        date: String(r.updatedAt || r.createdAt).slice(0, 10),
+        payer: r.applicantName,
+        plot: `${r.blockName} · Lot ${r.lotNo}`,
+        type: r.paymentOption === 'installment' ? 'Down payment' : 'Full payment',
+        method: r.paymentOption === 'gcash' ? 'gcash' : 'cash',
+        amount: Number(r.price) || 0,
+        source: 'reservation',
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+    return { payments, warnings: [] }
   })
 }
 

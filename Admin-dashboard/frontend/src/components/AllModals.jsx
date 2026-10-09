@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useAdmin } from '../context/AdminContext'
 import { STATUS, STATUS_META, STATUS_ORDER } from '../config/status'
-import { USER_STATUS, ADMIN_ROLE, RESERVATION_STATUS, RESERVATION_STATUS_META } from '../config/adminStatus'
+import { USER_STATUS, USER_STATUS_META, ADMIN_ROLE, RESERVATION_STATUS, RESERVATION_STATUS_META, MEMORIAL_STATUS, MEMORIAL_STATUS_META } from '../config/adminStatus'
+import { formatDate } from '../utils/date'
 import { plotLabel, plotShort } from '../utils/plot'
 import { peso } from '../utils/format'
 import * as api from '../api'
@@ -23,7 +24,7 @@ function Modal({ id, title, subtitle, children }) {
 
 // ── Update Lot — look up an existing lot by block+number, set its status ────
 function UpdateLotModal() {
-  const { modal, closeModal } = useAdmin()
+  const { modal, closeModal, runAction } = useAdmin()
   const isOpen = modal?.id === 'modal-updatelot'
   const record = modal?.record || null
 
@@ -54,12 +55,12 @@ function UpdateLotModal() {
     if (!blockId || !lotNo) return
     if (needsIntermentCount && (!intermentCount || Number(intermentCount) < 1)) return
     setSaving(true)
-    try {
-      await api.updateLotStatus(blockId, Number(lotNo), status, needsIntermentCount ? intermentCount : undefined)
-      closeModal()
-    } finally {
-      setSaving(false)
-    }
+    const ok = await runAction(
+      () => api.updateLotStatus(blockId, Number(lotNo), status, needsIntermentCount ? intermentCount : undefined),
+      `Lot ${lotNo} updated.`,
+    )
+    setSaving(false)
+    if (ok) closeModal()
   }
 
   return (
@@ -118,7 +119,7 @@ function UpdateLotModal() {
 
 // ── Add / Edit User ────────────────────────────────────────────────────────────
 function UserFormModal({ id, title, subtitle }) {
-  const { modal, closeModal } = useAdmin()
+  const { modal, closeModal, runAction } = useAdmin()
   const isOpen = modal?.id === id
   const record = modal?.record || null
   const [form, setForm] = useState({ name: '', email: '', phone: '', status: USER_STATUS.ACTIVE })
@@ -136,11 +137,12 @@ function UserFormModal({ id, title, subtitle }) {
   const submit = async () => {
     if (!form.name || !form.email) return
     setSaving(true)
-    try {
-      if (record) await api.updateUser(record.id, form)
-      else await api.createUser(form)
-      closeModal()
-    } finally { setSaving(false) }
+    const ok = await runAction(
+      () => (record ? api.updateUser(record.id, form) : api.createUser(form)),
+      record ? 'User updated.' : 'User added.',
+    )
+    setSaving(false)
+    if (ok) closeModal()
   }
 
   return (
@@ -170,7 +172,7 @@ function UserFormModal({ id, title, subtitle }) {
 
 // ── Add Memorial ───────────────────────────────────────────────────────────────
 function AddMemorialModal() {
-  const { modal, closeModal } = useAdmin()
+  const { modal, closeModal, runAction } = useAdmin()
   const isOpen = modal?.id === 'modal-addmemorial'
   const [form, setForm] = useState({ name: '', submittedBy: '', birth: '', death: '', blockId: '', lotNo: '', tribute: '' })
   const [blocks, setBlocks] = useState([])
@@ -184,17 +186,16 @@ function AddMemorialModal() {
   const submit = async () => {
     if (!form.name) return
     setSaving(true)
-    try {
-      await api.createMemorial({
+    const ok = await runAction(() => api.createMemorial({
         name: form.name, emoji: '🕊️',
         dates: `${form.birth || '?'} – ${form.death || '?'} · ${plotShort({ blockId: form.blockId, lotNo: form.lotNo })}`,
         quote: form.tribute, likes: 0, comments: 0,
         birth_date: form.birth || null, death_date: form.death || null,
         block_id: form.blockId || null, lot_no: form.lotNo ? Number(form.lotNo) : null,
         submitted_by: form.submittedBy || null,
-      })
-      closeModal()
-    } finally { setSaving(false) }
+      }), 'Memorial published.')
+    setSaving(false)
+    if (ok) closeModal()
   }
 
   return (
@@ -228,7 +229,7 @@ function AddMemorialModal() {
 
 // ── Add Admin Staff ────────────────────────────────────────────────────────────
 function AddAdminModal() {
-  const { modal, closeModal } = useAdmin()
+  const { modal, closeModal, runAction } = useAdmin()
   const isOpen = modal?.id === 'modal-addadmin'
   const [form, setForm] = useState({ name: '', email: '', role: ADMIN_ROLE.VIEWER })
   const [saving, setSaving] = useState(false)
@@ -240,8 +241,9 @@ function AddAdminModal() {
   const submit = async () => {
     if (!form.name || !form.email) return
     setSaving(true)
-    try { await api.addAdminStaff(form); closeModal() }
-    finally { setSaving(false) }
+    const ok = await runAction(() => api.addAdminStaff(form), 'Staff member added.')
+    setSaving(false)
+    if (ok) closeModal()
   }
 
   return (
@@ -267,7 +269,7 @@ function AddAdminModal() {
 // ── Reservation Detail (admin view — same data the applicant sees, plus
 // Confirm / Reject / Cancel actions) ─────────────────────────────────────────
 function ReservationDetailModal() {
-  const { modal, closeModal } = useAdmin()
+  const { modal, closeModal, runAction, confirmAction } = useAdmin()
   const isOpen = modal?.id === 'modal-reservation-detail'
   const r = modal?.record || null
   const [busy, setBusy] = useState(false)
@@ -275,9 +277,19 @@ function ReservationDetailModal() {
 
   const setStatus = async (status) => {
     setBusy(true)
-    try { await api.updateReservationStatus(r.id, status); closeModal() }
-    finally { setBusy(false) }
+    const ok = await runAction(() => api.updateReservationStatus(r.id, status), `Reservation ${RESERVATION_STATUS_META[status].label.toLowerCase()}.`)
+    setBusy(false)
+    if (ok) closeModal()
   }
+
+  // Swaps this modal for the confirm dialog (same history entry).
+  const askDelete = () => confirmAction({
+    title: 'Delete reservation?',
+    message: `${r.id} for ${r.applicantName} will be removed permanently.`,
+    confirmLabel: 'Delete',
+    successMessage: 'Reservation deleted.',
+    onConfirm: () => api.deleteReservation(r.id),
+  })
 
   return (
     <Modal id="modal-reservation-detail" title={`${r.blockName} · Lot ${r.lotNo}`} subtitle={r.lawnName}>
@@ -305,6 +317,7 @@ function ReservationDetailModal() {
 
       <div className="modal-actions">
         <button className="btn btn-outline" onClick={closeModal} disabled={busy}>Close</button>
+        <button className="btn btn-danger" onClick={askDelete} disabled={busy}>Delete</button>
         {r.status === RESERVATION_STATUS.PENDING && (
           <>
             <button className="btn btn-danger" onClick={() => setStatus(RESERVATION_STATUS.REJECTED)} disabled={busy}>Reject</button>
@@ -319,6 +332,136 @@ function ReservationDetailModal() {
   )
 }
 
+// ── Confirm (used by every Delete / Remove button) ─────────────────────────
+function ConfirmModal() {
+  const { modal, closeModal, runAction } = useAdmin()
+  const isOpen = modal?.id === 'modal-confirm'
+  const o = modal?.record || {}
+  const [busy, setBusy] = useState(false)
+  if (!isOpen) return null
+
+  const confirm = async () => {
+    setBusy(true)
+    const ok = await runAction(() => o.onConfirm?.(), o.successMessage)
+    setBusy(false)
+    if (ok) closeModal()
+  }
+
+  return (
+    <Modal id="modal-confirm" title={o.title || 'Are you sure?'} subtitle={o.message}>
+      <div className="modal-actions">
+        <button className="btn btn-outline" onClick={closeModal} disabled={busy}>Keep it</button>
+        <button className="btn btn-danger" onClick={confirm} disabled={busy}>{busy ? 'Working…' : (o.confirmLabel || 'Delete')}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── View User ─────────────────────────────────────────────────────────────────
+function UserViewModal() {
+  const { modal, closeModal, openModal } = useAdmin()
+  const u = modal?.id === 'modal-viewuser' ? modal.record : null
+  if (!u) return null
+  return (
+    <Modal id="modal-viewuser" title={u.name} subtitle={u.email}>
+      {[
+        ['User ID', u.id],
+        ['Phone', u.phone || '—'],
+        ['Joined', formatDate(u.joined)],
+        ['Status', USER_STATUS_META[u.status]?.label || u.status],
+        ['Plots', u.plots?.length ? u.plots.map(plotLabel).join(', ') : 'None yet'],
+      ].map(([l, v]) => (
+        <div key={l} className="detail-row"><span className="detail-label">{l}</span><span className="detail-val">{v}</span></div>
+      ))}
+      <div className="modal-actions">
+        <button className="btn btn-outline" onClick={closeModal}>Close</button>
+        <button className="btn btn-primary" onClick={() => openModal('modal-edituser', u)}>Edit User</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Edit Memorial ─────────────────────────────────────────────────────────────
+function EditMemorialModal() {
+  const { modal, closeModal, runAction } = useAdmin()
+  const isOpen = modal?.id === 'modal-editmemorial'
+  const record = modal?.record || null
+  const [form, setForm] = useState({})
+  const [blocks, setBlocks] = useState([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { api.getBlocks().then(setBlocks) }, [])
+  useEffect(() => {
+    if (!isOpen || !record) return
+    setForm({
+      name: record.name || '', birth: record.birth || '', death: record.death || '',
+      blockId: record.blockId || '', lotNo: record.lotNo ?? '', quote: record.quote || '',
+      status: record.status || MEMORIAL_STATUS.PENDING,
+    })
+  }, [isOpen, record])
+  if (!isOpen || !record) return null
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const submit = async () => {
+    if (!form.name) return
+    setSaving(true)
+    const ok = await runAction(() => api.updateMemorial(record.id, form), 'Memorial updated.')
+    setSaving(false)
+    if (ok) closeModal()
+  }
+
+  return (
+    <Modal id="modal-editmemorial" title="Edit Memorial" subtitle={record.name}>
+      <div className="modal-row">
+        <div className="modal-field"><label>Name of Deceased</label><input value={form.name || ''} onChange={set('name')} /></div>
+        <div className="modal-field">
+          <label>Status</label>
+          <select value={form.status} onChange={set('status')}>
+            {Object.values(MEMORIAL_STATUS).map(s => <option key={s} value={s}>{MEMORIAL_STATUS_META[s].label}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="modal-row">
+        <div className="modal-field"><label>Birth Date</label><input type="date" value={form.birth || ''} onChange={set('birth')} /></div>
+        <div className="modal-field"><label>Death Date</label><input type="date" value={form.death || ''} onChange={set('death')} /></div>
+      </div>
+      <div className="modal-row">
+        <div className="modal-field">
+          <label>Block</label>
+          <select value={form.blockId || ''} onChange={set('blockId')}>
+            <option value="">Select a block…</option>
+            {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div className="modal-field"><label>Lot Number</label><input type="number" min="1" value={form.lotNo ?? ''} onChange={set('lotNo')} /></div>
+      </div>
+      <div className="modal-field"><label>Tribute Message</label><textarea value={form.quote || ''} onChange={set('quote')} /></div>
+      <div className="modal-actions">
+        <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={submit} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save Changes'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Notification Preview ─────────────────────────────────────────────────────
+function NotificationPreviewModal() {
+  const { modal, closeModal } = useAdmin()
+  const n = modal?.id === 'modal-notif-preview' ? modal.record : null
+  if (!n) return null
+  return (
+    <Modal id="modal-notif-preview" title="Preview" subtitle={`To: ${n.recipients}`}>
+      <div className="notif-preview">
+        <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--charcoal)' }}>{n.title || 'Announcement'}</p>
+        <p style={{ fontSize: 13, color: 'var(--dgray)', marginTop: 6, whiteSpace: 'pre-wrap' }}>{n.body || 'No message yet.'}</p>
+      </div>
+      <div className="modal-actions">
+        <button className="btn btn-outline" onClick={closeModal}>Close</button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function AllModals() {
   return (
     <>
@@ -328,6 +471,10 @@ export default function AllModals() {
       <AddMemorialModal />
       <AddAdminModal />
       <ReservationDetailModal />
+      <ConfirmModal />
+      <UserViewModal />
+      <EditMemorialModal />
+      <NotificationPreviewModal />
     </>
   )
 }

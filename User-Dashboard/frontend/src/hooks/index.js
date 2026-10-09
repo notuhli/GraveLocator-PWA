@@ -69,8 +69,9 @@ export function useLegend() {
   return { legend: data || [], loading, error }
 }
 
-export function useMemorials() {
-  const { data, loading, error, reload } = useAsync(() => api.getMemorials(), [])
+// Private: only the signed-in user's own memorials. Re-fetches when the user changes.
+export function useMemorials(userId) {
+  const { data, loading, error, reload } = useAsync(() => api.getMemorials(userId), [userId])
   return { memorials: data || [], loading, error, reload }
 }
 

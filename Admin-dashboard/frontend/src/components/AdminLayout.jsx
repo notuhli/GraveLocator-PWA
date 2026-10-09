@@ -6,6 +6,7 @@ import PlotsPage from '../pages/PlotsPage'
 import ReservationsPage from '../pages/ReservationsPage'
 import { UsersPage, MemorialsPage, ReportsPage, NotificationsPage, SettingsPage } from '../pages/OtherPages'
 import { useAdmin } from '../context/AdminContext'
+import { ENV } from '../config/constants'
 
 const pages = {
   dashboard: DashboardPage,
@@ -19,7 +20,7 @@ const pages = {
 }
 
 export default function AdminLayout() {
-  const { activePage, setActivePage } = useAdmin()
+  const { activePage, setActivePage, toast } = useAdmin()
 
   const PageComponent = pages[activePage] || DashboardPage
 
@@ -39,6 +40,12 @@ export default function AdminLayout() {
       </main>
 
       <AllModals />
+
+      {toast && (
+        <div key={toast.id} className={`admin-toast ${toast.type}`} role="status" aria-live="polite">
+          {toast.message}
+        </div>
+      )}
     </div>
   )
 }

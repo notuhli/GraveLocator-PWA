@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext'
 import { CLASSIFICATION } from '../config/constants'
 import { statusLabel, statusMeta, isSellable } from '../config/status'
 import { peso, percent, intermentMarks } from '../utils/format'
+import { addRecentlyViewed } from '../hooks/useRecentlyViewed'
 
 // ── SearchScreen ─────────────────────────────────────────────────────────────
 // Searches real blocks (name / lawn name). Tapping a result opens the map,
@@ -86,7 +87,7 @@ export function SearchScreen({ onNavigate, onBack }) {
 // lot off to the reservation flow (frontend-only demo — see
 // BACKEND_INTEGRATION.md).
 export function PlotDetailScreen({ onNavigate, onBack, routeLot }) {
-  const { activeLot, setActiveLot, setActiveBlockId } = useApp()
+  const { activeLot, setActiveLot, setActiveBlockId, user, userKey } = useApp()
   const { blocks } = useBlocks()
   const { pricing } = usePricing()
 
@@ -121,6 +122,14 @@ export function PlotDetailScreen({ onNavigate, onBack, routeLot }) {
       setActiveLot(lot)
     }
   }, [routeActiveLot, routeLot?.blockId, routeLot?.lotNo, activeLot, lot, setActiveLot])
+
+  // Save this lot to "Recently Viewed" (skip the built-in sample fallback lot).
+  const isRealLot = !!(routeActiveLot || activeLot || (routeLot?.blockId && routeLot?.lotNo))
+  const recentOwner = userKey || user?.id
+  useEffect(() => {
+    if (isRealLot) addRecentlyViewed(recentOwner, lot)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRealLot, recentOwner, lot.blockId, lot.lotNo])
 
   const locateOnMap = () => {
     if (lot.blockId) setActiveBlockId(lot.blockId)
@@ -208,7 +217,7 @@ export function PlotDetailScreen({ onNavigate, onBack, routeLot }) {
             Locate on Map
           </button>
           <button className="btn btn-secondary btn-sm" style={{ flex:1 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg> Share
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg> Share
           </button>
         </div>
       </div>

@@ -29,3 +29,9 @@ export async function request(path, options = {}) {
 }
 
 export const USE_REMOTE = ENV.USE_REMOTE
+// ── Data-change signal ───────────────────────────────────────────────────────
+// Every create/update/delete in api/index.js calls emitDataChange(); every data
+// hook re-fetches when it fires, so tables refresh right after an action.
+const listeners = new Set()
+export function onDataChange(fn) { listeners.add(fn); return () => listeners.delete(fn) }
+export function emitDataChange() { listeners.forEach((fn) => fn()) }

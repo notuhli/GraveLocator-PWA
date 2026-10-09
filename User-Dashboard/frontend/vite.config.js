@@ -4,6 +4,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    // Allow Cloudflare tunnel links (any *.trycloudflare.com subdomain)
+    // so the app can be opened on a phone over HTTPS (needed for location).
+    allowedHosts: ['.trycloudflare.com'],
+  },
   plugins: [
     react(),
     VitePWA({
@@ -16,8 +21,8 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        theme_color: '#863bff',
-        background_color: '#863bff',
+        theme_color: '#0284C7',
+        background_color: '#0284C7',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
@@ -35,6 +40,17 @@ export default defineConfig({
           {
             urlPattern: /\/api\/.*/,
             handler: 'NetworkOnly',
+          },
+          // Map tiles: cache what's been viewed so the park map still loads
+          // on weak/no signal inside the cemetery.
+          {
+            urlPattern: /^https:\/\/(server\.arcgisonline\.com|tile\.openstreetmap\.org)\/.*/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'map-tiles',
+              expiration: { maxEntries: 600, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
           },
         ],
       },

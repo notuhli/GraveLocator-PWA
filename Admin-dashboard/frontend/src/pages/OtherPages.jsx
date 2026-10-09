@@ -1,20 +1,41 @@
 import { useState, useEffect } from 'react'
-import { useUsers, useMemorialQueue, useBlockOccupancy, useNotifications, useAdminStaff } from '../hooks'
+import { useUsers, useMemorialQueue, useBlockOccupancy, useNotifications, useAdminStaff, useSettings, usePaidPayments } from '../hooks'
 import { useAdmin } from '../context/AdminContext'
 import { USER_STATUS_META, MEMORIAL_STATUS, MEMORIAL_STATUS_META } from '../config/adminStatus'
 import { formatDate } from '../utils/date'
+import { peso } from '../utils/format'
 import { plotShort, plotLabel } from '../utils/plot'
-import { PARK } from '../config/constants'
 import * as api from '../api'
+import { downloadCSV } from '../utils/csv'
 
-// ── Users (public site accounts) ──────────────────────────────────────────────
+// "5 min ago" / "3 days ago" for the Last Active column.
+function timeAgo(iso) {
+  if (!iso) return 'Never'
+  const sec = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+  if (sec < 60) return 'Just now'
+  const min = sec / 60, hr = min / 60, day = hr / 24
+  if (min < 60) return `${Math.floor(min)} min ago`
+  if (hr < 24) return `${Math.floor(hr)} hr${Math.floor(hr) === 1 ? '' : 's'} ago`
+  if (day < 30) return `${Math.floor(day)} day${Math.floor(day) === 1 ? '' : 's'} ago`
+  return formatDate(String(iso).slice(0, 10))
+}
+
 export function UsersPage() {
   const { users, loading, reload } = useUsers()
   const { openModal } = useAdmin()
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
 
+  // Refresh every 60s so Online / Last Active stay current.
+  useEffect(() => {
+    const id = setInterval(reload, 60 * 1000)
+    return () => clearInterval(id)
+  }, [reload])
+
+  const counts = users.reduce((acc, u) => { acc[u.status] = (acc[u.status] || 0) + 1; return acc }, {})
   const filtered = users.filter((u) =>
-    !search || `${u.name} ${u.email}`.toLowerCase().includes(search.toLowerCase())
+    (statusFilter === 'all' || u.status === statusFilter) &&
+    (!search || `${u.name} ${u.email}`.toLowerCase().includes(search.toLowerCase()))
   )
 
   const removeUser = async (id) => { await api.deleteUser(id); reload() }
@@ -30,29 +51,45 @@ export function UsersPage() {
       </div>
       <div className="filter-bar">
         <input className="filter-input" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
+        <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="all">All statuses ({users.length})</option>
+          {Object.entries(USER_STATUS_META).map(([key, meta]) => (
+            <option key={key} value={key}>{meta.label} ({counts[key] || 0})</option>
+          ))}
+        </select>
         <button className="btn btn-outline btn-sm" style={{ marginLeft: 'auto' }}>Export CSV</button>
       </div>
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>User ID</th><th>Full Name</th><th>Email</th><th>Phone</th><th>Plots</th><th>Joined</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>User ID</th><th>Full Name</th><th>Email</th><th>Phone</th><th>Plots</th><th>Joined</th><th>Last Active</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-              {!loading && filtered.map(u => (
-                <tr key={u.id}>
-                  <td style={{ fontWeight: 700, color: 'var(--sage)' }}>{u.id}</td>
-                  <td style={{ fontWeight: 600 }}>{u.name}</td>
-                  <td>{u.email}</td>
-                  <td>{u.phone}</td>
-                  <td title={u.plots.map(plotLabel).join(', ')}>{u.plots.length}</td>
-                  <td>{formatDate(u.joined)}</td>
-                  <td><span className={`badge ${USER_STATUS_META[u.status].badge}`}>{USER_STATUS_META[u.status].label}</span></td>
-                  <td><div className="action-cell">
-                    <button className="btn btn-ghost btn-xs" onClick={() => openModal('modal-edituser', u)}>Edit</button>
-                    <button className="btn btn-outline btn-xs">View</button>
-                    <button className="btn btn-danger btn-xs" onClick={() => removeUser(u.id)}>Delete</button>
-                  </div></td>
-                </tr>
-              ))}
+              {loading && users.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--dgray)' }}>Loading users…</td></tr>
+              )}
+              {!loading && filtered.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--dgray)' }}>No users match.</td></tr>
+              )}
+              {filtered.map(u => {
+                const meta = USER_STATUS_META[u.status] || USER_STATUS_META.inactive
+                return (
+                  <tr key={u.id}>
+                    <td className="user-id-cell" title={u.id}>{String(u.id).slice(0, 8)}…</td>
+                    <td style={{ fontWeight: 600 }}>{u.name}{u.role === 'admin' && <span className="role-chip">Admin</span>}</td>
+                    <td>{u.email}</td>
+                    <td>{u.phone}</td>
+                    <td title={u.plots.map(plotLabel).join(', ')}>{u.plots.length}</td>
+                    <td>{formatDate(u.joined)}</td>
+                    <td title={u.lastActive ? new Date(u.lastActive).toLocaleString() : ''}>{timeAgo(u.lastActive)}</td>
+                    <td><span className={`badge ${meta.badge}`}>{u.status === 'online' && <span className="online-dot" />}{meta.label}</span></td>
+                    <td><div className="action-cell">
+                      <button className="btn btn-ghost btn-xs" onClick={() => openModal('modal-edituser', u)}>Edit</button>
+                      <button className="btn btn-outline btn-xs">View</button>
+                      <button className="btn btn-danger btn-xs" onClick={() => removeUser(u.id)}>Delete</button>
+                    </div></td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -63,15 +100,21 @@ export function UsersPage() {
 
 // ── Digital Memorials (moderation queue) ──────────────────────────────────────
 export function MemorialsPage() {
-  const { queue, loading, reload } = useMemorialQueue()
-  const { modal, openModal } = useAdmin()
+  const { queue, loading } = useMemorialQueue()
+  const { openModal, runAction, confirmAction } = useAdmin()
   const [search, setSearch] = useState('')
 
   const filtered = queue.filter((m) => !search || m.name.toLowerCase().includes(search.toLowerCase()))
-  const setStatus = async (id, status) => { await api.updateMemorialQueueStatus(id, status); reload() }
+  const setStatus = (m, status) =>
+    runAction(() => api.updateMemorialQueueStatus(m.id, status), `${m.name}: ${MEMORIAL_STATUS_META[status].label.toLowerCase()}.`)
 
-  // The Add Memorial modal creates a real row — refresh the queue once it closes.
-  useEffect(() => { if (modal === null) reload() }, [modal])
+  const removeMemorial = (m) => confirmAction({
+    title: 'Delete memorial?',
+    message: `The memorial for ${m.name} will be removed permanently.`,
+    confirmLabel: 'Delete',
+    successMessage: 'Memorial deleted.',
+    onConfirm: () => api.deleteMemorial(m.id),
+  })
 
   return (
     <div>
@@ -98,16 +141,19 @@ export function MemorialsPage() {
                   <td>{formatDate(m.birth)}</td>
                   <td>{formatDate(m.death)}</td>
                   <td>{formatDate(m.submitted)}</td>
-                  <td><span className={`badge ${MEMORIAL_STATUS_META[m.status].badge}`}>{MEMORIAL_STATUS_META[m.status].label}</span></td>
+                  <td><span className={`badge ${MEMORIAL_STATUS_META[m.status]?.badge || ''}`}>{MEMORIAL_STATUS_META[m.status]?.label || m.status}</span></td>
                   <td><div className="action-cell">
-                    {m.status === MEMORIAL_STATUS.PENDING && <button className="btn btn-ghost btn-xs" onClick={() => setStatus(m.id, MEMORIAL_STATUS.APPROVED)}>Approve</button>}
-                    {m.status === MEMORIAL_STATUS.APPROVED && <button className="btn btn-amber btn-xs" onClick={() => setStatus(m.id, MEMORIAL_STATUS.FEATURED)}>Feature</button>}
-                    {m.status === MEMORIAL_STATUS.FEATURED && <button className="btn btn-outline btn-xs" onClick={() => setStatus(m.id, MEMORIAL_STATUS.APPROVED)}>Unfeature</button>}
-                    <button className="btn btn-ghost btn-xs">Edit</button>
-                    <button className="btn btn-danger btn-xs">Delete</button>
+                    {m.status === MEMORIAL_STATUS.PENDING && <button className="btn btn-ghost btn-xs" onClick={() => setStatus(m, MEMORIAL_STATUS.APPROVED)}>Approve</button>}
+                    {m.status === MEMORIAL_STATUS.APPROVED && <button className="btn btn-amber btn-xs" onClick={() => setStatus(m, MEMORIAL_STATUS.FEATURED)}>Feature</button>}
+                    {m.status === MEMORIAL_STATUS.FEATURED && <button className="btn btn-outline btn-xs" onClick={() => setStatus(m, MEMORIAL_STATUS.APPROVED)}>Unfeature</button>}
+                    <button className="btn btn-ghost btn-xs" onClick={() => openModal('modal-editmemorial', m)}>Edit</button>
+                    <button className="btn btn-danger btn-xs" onClick={() => removeMemorial(m)}>Delete</button>
                   </div></td>
                 </tr>
               ))}
+              {!loading && filtered.length === 0 && (
+                <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--dgray)', padding: 24 }}>No memorials match this search.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -117,20 +163,167 @@ export function MemorialsPage() {
 }
 
 // ── Reports & Analytics ────────────────────────────────────────────────────────
+// Monthly income (from paid payments) + list of paid payments, plus the
+// existing plot-occupancy report. "Export CSV" opens in Excel; "Print / PDF"
+// uses the browser's print dialog (choose "Save as PDF").
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash' }
+
+function downloadCsv(filename, rows) {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const csv = rows.map((r) => r.map(esc).join(',')).join('\r\n')
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename
+  document.body.appendChild(a); a.click(); a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function ReportsPage() {
   const { occupancy } = useBlockOccupancy()
+  const { payments, warnings, loading, error, reload } = usePaidPayments()
+
+  const now = new Date()
+  const thisYear = now.getFullYear()
+  const [year, setYear] = useState(thisYear)
+  const [month, setMonth] = useState('all') // 'all' | 0..11
+  const [query, setQuery] = useState('')
+
+  // Years that have payments (always include the current year).
+  const years = [...new Set([thisYear, ...payments.map((p) => Number(p.date.slice(0, 4)))])]
+    .filter(Boolean).sort((a, b) => b - a)
+
+  const yearPayments = payments.filter((p) => Number(p.date.slice(0, 4)) === year)
+
+  // Monthly income for the selected year.
+  const monthly = MONTHS.map((label, i) => {
+    const items = yearPayments.filter((p) => Number(p.date.slice(5, 7)) === i + 1)
+    return { label, i, total: items.reduce((s, p) => s + p.amount, 0), count: items.length }
+  })
+  const maxMonth = Math.max(1, ...monthly.map((m) => m.total))
+  const yearTotal = monthly.reduce((s, m) => s + m.total, 0)
+  const thisMonthTotal = year === thisYear ? monthly[now.getMonth()].total : 0
+  const activeMonths = monthly.filter((m) => m.total > 0).length
+  const avgMonth = activeMonths ? yearTotal / activeMonths : 0
+
+  // Paid payments table (year + month + search).
+  const q = query.trim().toLowerCase()
+  const rows = yearPayments
+    .filter((p) => month === 'all' || Number(p.date.slice(5, 7)) === month + 1)
+    .filter((p) => !q || `${p.payer} ${p.plot} ${p.type} ${p.method}`.toLowerCase().includes(q))
+  const rowsTotal = rows.reduce((s, p) => s + p.amount, 0)
+
+  const exportCsv = () => {
+    const period = month === 'all' ? `${year}` : `${MONTHS[month]}-${year}`
+    downloadCsv(`gravelocator-paid-payments-${period}.csv`, [
+      ['Date', 'Payer', 'Plot', 'Type', 'Method', 'Amount (PHP)'],
+      ...rows.map((p) => [p.date, p.payer, p.plot, p.type, METHOD_LABEL[p.method] || p.method, p.amount]),
+      [],
+      ['', '', '', '', 'Total', rowsTotal],
+      [],
+      ['Monthly income', year],
+      ...monthly.map((m) => [m.label, m.total]),
+      ['Year total', yearTotal],
+    ])
+  }
 
   return (
-    <div>
+    <div className="reports-page">
       <div className="page-header">
-        <div><h2>Reports & Analytics</h2><p>Visualize cemetery data across all digitized blocks.</p></div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-ghost">Export PDF</button>
-          <button className="btn btn-primary">Export Excel</button>
+        <div><h2>Reports & Analytics</h2><p>Monthly income, paid payments, and plot occupancy.</p></div>
+        <div className="no-print" style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-ghost" onClick={() => window.print()}>Print / PDF</button>
+          <button className="btn btn-primary" onClick={exportCsv} disabled={!rows.length}>Export CSV (Excel)</button>
         </div>
       </div>
 
-      <div className="card">
+      {/* Filters */}
+      <div className="card no-print rp-filters">
+        <label>Year
+          <select className="filter-select" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </label>
+        <label>Month
+          <select className="filter-select" value={month} onChange={(e) => setMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
+            <option value="all">All months</option>
+            {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+          </select>
+        </label>
+        <input className="filter-input" placeholder="Search payer, plot, type…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <button className="btn btn-ghost btn-sm" onClick={reload}>Refresh</button>
+      </div>
+
+      {error && <div className="card rp-alert rp-alert-err">Could not load payments: {error.message}</div>}
+      {warnings.map((w) => <div key={w} className="card rp-alert">{w}</div>)}
+
+      {/* Summary */}
+      <div className="rp-stats">
+        <div className="card rp-stat"><span>Total income · {year}</span><b>{peso(yearTotal)}</b></div>
+        <div className="card rp-stat"><span>This month</span><b>{year === thisYear ? peso(thisMonthTotal) : '—'}</b></div>
+        <div className="card rp-stat"><span>Paid payments · {year}</span><b>{yearPayments.length}</b></div>
+        <div className="card rp-stat"><span>Average / active month</span><b>{peso(Math.round(avgMonth))}</b></div>
+      </div>
+
+      {/* Monthly income chart */}
+      <div className="card" style={{ marginTop: 18 }}>
+        <p className="chart-title">Monthly Income · {year}</p>
+        {loading ? <p className="rp-muted">Loading payments…</p> : (
+          <div className="rp-chart" role="img" aria-label={`Monthly income for ${year}`}>
+            {monthly.map((m) => (
+              <button
+                key={m.label}
+                type="button"
+                className={`rp-bar-col${month === m.i ? ' active' : ''}`}
+                onClick={() => setMonth(month === m.i ? 'all' : m.i)}
+                title={`${m.label} ${year}: ${peso(m.total)} (${m.count} payment${m.count === 1 ? '' : 's'})`}
+              >
+                <span className="rp-bar-val">{m.total ? peso(m.total) : ''}</span>
+                <span className="rp-bar-track"><span className="rp-bar" style={{ height: `${(m.total / maxMonth) * 100}%` }} /></span>
+                <span className="rp-bar-label">{m.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="rp-muted" style={{ marginTop: 8 }}>Tap a month to filter the paid payments list.</p>
+      </div>
+
+      {/* Paid payments */}
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="flex justify-between items-center mb-16">
+          <p className="chart-title" style={{ marginBottom: 0 }}>
+            Paid Payments · {month === 'all' ? year : `${MONTHS[month]} ${year}`}
+          </p>
+          <span className="rp-total">{rows.length} payment{rows.length === 1 ? '' : 's'} · <b>{peso(rowsTotal)}</b></span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Payer</th><th>Plot</th><th>Type</th><th>Method</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+            <tbody>
+              {!loading && rows.length === 0 && (
+                <tr><td colSpan={6} className="rp-muted" style={{ textAlign: 'center', padding: 24 }}>No paid payments for this period.</td></tr>
+              )}
+              {rows.map((p) => (
+                <tr key={p.id}>
+                  <td>{formatDate(p.date)}</td>
+                  <td>{p.payer}</td>
+                  <td>{p.plot}</td>
+                  <td>{p.type}</td>
+                  <td><span className={`badge rp-method rp-method-${p.method === 'gcash' ? 'gcash' : 'cash'}`}>{METHOD_LABEL[p.method] || p.method}</span></td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{peso(p.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot><tr><td colSpan={5} style={{ textAlign: 'right', fontWeight: 700 }}>Total</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{peso(rowsTotal)}</td></tr></tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* Existing occupancy report */}
+      <div className="card" style={{ marginTop: 18 }}>
         <p className="chart-title">Plot Occupancy by Block</p>
         <div className="progress-bar-list">
           {occupancy.map((b) => (
@@ -166,21 +359,32 @@ export function ReportsPage() {
 
 // ── Notifications ──────────────────────────────────────────────────────────────
 export function NotificationsPage() {
-  const { sent, stats, alerts, loading, reload } = useNotifications()
+  const { sent, stats, alerts, loading } = useNotifications()
+  const { openModal, runAction, notify } = useAdmin()
+  const [recipients, setRecipients] = useState('All Users')
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
+  const [scheduleAt, setScheduleAt] = useState('')
 
-  const send = async () => {
+  const draft = () => ({ title: subject || 'Announcement', body: message, recipients })
+
+  const send = async (scheduledFor) => {
     if (!message.trim()) return
     setSending(true)
-    try {
-      await api.sendNotification({ title: subject || 'Announcement', body: message })
-      setSubject(''); setMessage('')
-      reload()
-    } finally {
-      setSending(false)
-    }
+    const ok = await runAction(
+      () => api.sendNotification({ ...draft(), ...(scheduledFor ? { scheduledFor } : {}) }),
+      scheduledFor ? `Scheduled for ${new Date(scheduledFor).toLocaleString()}.` : 'Notification sent.',
+    )
+    setSending(false)
+    if (ok) { setSubject(''); setMessage(''); setScheduling(false); setScheduleAt('') }
+  }
+
+  const confirmSchedule = () => {
+    if (!scheduleAt) { notify('Pick a date and time first.', 'error'); return }
+    if (new Date(scheduleAt) <= new Date()) { notify('Choose a time in the future.', 'error'); return }
+    send(new Date(scheduleAt).toISOString())
   }
 
   return (
@@ -195,7 +399,7 @@ export function NotificationsPage() {
             <div className="modal-row" style={{ marginBottom: 14 }}>
               <div className="modal-field">
                 <label>Recipients</label>
-                <select className="filter-select" style={{ width: '100%' }}><option>All Users</option><option>Users with Plots</option><option>Specific User</option></select>
+                <select className="filter-select" style={{ width: '100%' }} value={recipients} onChange={e => setRecipients(e.target.value)}><option>All Users</option><option>Users with Plots</option><option>Specific User</option></select>
               </div>
               <div className="modal-field">
                 <label>Subject</label>
@@ -207,10 +411,17 @@ export function NotificationsPage() {
               <textarea className="filter-input" style={{ width: '100%', minHeight: 100, resize: 'vertical' }} placeholder="Write your notification message here…" value={message} onChange={e => setMessage(e.target.value)} />
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button className="btn btn-primary" onClick={send} disabled={sending || !message.trim()}>{sending ? 'Sending…' : 'Send Now'}</button>
-              <button className="btn btn-ghost">Schedule</button>
-              <button className="btn btn-outline">Preview</button>
+              <button className="btn btn-primary" onClick={() => send()} disabled={sending || !message.trim()}>{sending ? 'Sending…' : 'Send Now'}</button>
+              <button className="btn btn-ghost" onClick={() => setScheduling((v) => !v)} disabled={sending || !message.trim()}>Schedule</button>
+              <button className="btn btn-outline" onClick={() => openModal('modal-notif-preview', draft())}>Preview</button>
             </div>
+            {scheduling && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+                <input type="datetime-local" className="filter-input" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} />
+                <button className="btn btn-primary btn-sm" onClick={confirmSchedule} disabled={sending}>Confirm Schedule</button>
+                <button className="btn btn-outline btn-sm" onClick={() => setScheduling(false)}>Cancel</button>
+              </div>
+            )}
           </div>
 
           <div className="card">
@@ -225,7 +436,10 @@ export function NotificationsPage() {
                     <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--charcoal)' }}>{n.title}</p>
                     <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 2 }}>{n.body}</p>
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--dgray)', flexShrink: 0 }}>{new Date(n.sentAt).toLocaleDateString()}</span>
+                  <span style={{ fontSize: 11, color: 'var(--dgray)', flexShrink: 0, textAlign: 'right' }}>
+                    {n.scheduledFor ? `Scheduled ${new Date(n.scheduledFor).toLocaleString()}` : new Date(n.sentAt).toLocaleDateString()}
+                    {n.recipients && <><br />{n.recipients}</>}
+                  </span>
                 </div>
               ))}
             </div>
@@ -267,36 +481,57 @@ export function NotificationsPage() {
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 export function SettingsPage() {
-  const { staff, loading, reload } = useAdminStaff()
-  const { openModal } = useAdmin()
+  const { staff, loading } = useAdminStaff()
+  const { settings } = useSettings()
+  const { openModal, confirmAction, runAction } = useAdmin()
+  const [form, setForm] = useState(null)
+  const [saving, setSaving] = useState(false)
 
-  const removeStaff = async (id) => { await api.removeAdminStaff(id); reload() }
+  useEffect(() => { if (settings && !form) setForm(settings) }, [settings, form])
+
+  const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const toggle = (k) => setForm((f) => ({ ...f, [k]: !f[k] }))
+  const dirty = form && settings && JSON.stringify(form) !== JSON.stringify(settings)
+
+  const save = async () => {
+    setSaving(true)
+    await runAction(() => api.saveSettings(form), 'Settings saved.')
+    setSaving(false)
+  }
+
+  const removeStaff = (a) => confirmAction({
+    title: 'Remove staff member?',
+    message: `${a.name} will lose access to the admin dashboard.`,
+    confirmLabel: 'Remove',
+    successMessage: `${a.name} removed.`,
+    onConfirm: () => api.removeAdminStaff(a.id),
+  })
 
   return (
     <div>
       <div className="page-header">
         <div><h2>Settings</h2><p>Configure system preferences and admin access.</p></div>
-        <button className="btn btn-primary">Save Changes</button>
+        <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save Changes'}</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div>
           <div className="card settings-section">
             <h3>Cemetery Information</h3>
-            {[
-              ['Cemetery Name', PARK.name],
-              ['Address', PARK.address],
-              ['Contact Number', PARK.tel],
-              ['Tagline', PARK.tagline],
-            ].map(([l, v]) => (
-              <div key={l} className="modal-field" style={{ marginBottom: 12 }}>
+            {form && [
+              ['Cemetery Name', 'cemeteryName'],
+              ['Address', 'address'],
+              ['Contact Number', 'contactNumber'],
+              ['Tagline', 'tagline'],
+            ].map(([l, k]) => (
+              <div key={k} className="modal-field" style={{ marginBottom: 12 }}>
                 <label>{l}</label>
-                <input defaultValue={v} />
+                <input value={form[k] || ''} onChange={setField(k)} />
               </div>
             ))}
             <p style={{ fontSize: 11, color: 'var(--dgray)', marginTop: 4 }}>
-              These come from the shared config/constants.js both dashboards read —
-              changing them here is meant to update one place, not each app separately.
+              Saved on this device for now. Once a settings table exists, both
+              dashboards can read these from one place.
             </p>
           </div>
         </div>
@@ -304,16 +539,21 @@ export function SettingsPage() {
         <div>
           <div className="card settings-section">
             <h3>Notification Preferences</h3>
-            {[
-              ['Email notifications', true],
-              ['SMS notifications', true],
-              ['Memorial submission alerts', true],
-              ['New user registration alerts', true],
-              ['System alerts', false],
-            ].map(([label, on]) => (
-              <div key={label} className="settings-row">
+            {form && [
+              ['Email notifications', 'emailNotifications'],
+              ['SMS notifications', 'smsNotifications'],
+              ['Memorial submission alerts', 'memorialAlerts'],
+              ['New user registration alerts', 'newUserAlerts'],
+              ['System alerts', 'systemAlerts'],
+            ].map(([label, k]) => (
+              <div key={k} className="settings-row">
                 <span style={{ fontSize: 13, color: 'var(--charcoal)' }}>{label}</span>
-                <div className={`toggle-switch ${on ? '' : 'off'}`}/>
+                <div
+                  className={`toggle-switch ${form[k] ? '' : 'off'}`}
+                  role="switch" aria-checked={!!form[k]} aria-label={label} tabIndex={0}
+                  onClick={() => toggle(k)}
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(k) } }}
+                />
               </div>
             ))}
           </div>
@@ -329,7 +569,7 @@ export function SettingsPage() {
                     <p style={{ fontSize: 11, color: 'var(--dgray)' }}>{a.role}</p>
                   </div>
                 </div>
-                <button className="btn btn-danger btn-xs" onClick={() => removeStaff(a.id)}>Remove</button>
+                <button className="btn btn-danger btn-xs" onClick={() => removeStaff(a)}>Remove</button>
               </div>
             ))}
             <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={() => openModal('modal-addadmin')}>+ Add Staff</button>

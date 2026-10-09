@@ -11,6 +11,16 @@ import * as api from '../api'
 
 const AppContext = createContext(null)
 
+// Demo-mode login survives a refresh (Supabase keeps its own session when remote).
+const LOCAL_USER_KEY = 'gl:session'
+function loadLocalUser() {
+  if (ENV.USE_REMOTE) return null
+  try { return JSON.parse(localStorage.getItem(LOCAL_USER_KEY)) } catch { return null }
+}
+function saveLocalUser(u) {
+  try { u ? localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u)) : localStorage.removeItem(LOCAL_USER_KEY) } catch { /* ignore */ }
+}
+
 // Recently viewed is stored per user on this device, newest first.
 const RECENT_LIMIT = 5
 const recentKey = (userKey) => `gl:recent:${userKey || 'guest'}`
@@ -28,7 +38,7 @@ const DEFAULT_USER = {
 }
 
 export function AppProvider({ children }) {
-  const [user, setUser] = useState(null)          // null = logged out
+  const [user, setUser] = useState(loadLocalUser) // null = logged out
   const [authLoading, setAuthLoading] = useState(ENV.USE_REMOTE)
   const [activeBlockId, setActiveBlockId] = useState(null) // map: which block is open
   const [activeLot, setActiveLot] = useState(null)         // map → plot-detail handoff
@@ -99,8 +109,8 @@ export function AppProvider({ children }) {
     authLoading,
 
     // Local-stub login (used when VITE_USE_REMOTE=false).
-    login: (profile) => setUser({ ...DEFAULT_USER, ...(profile || {}) }),
-    logout: () => setUser(null),
+    login: (profile) => { const u = { ...DEFAULT_USER, ...(profile || {}) }; saveLocalUser(u); setUser(u) },
+    logout: () => { saveLocalUser(null); setUser(null) },
 
     // Real Supabase auth — call these from the login/signup screens when remote.
     signIn: async ({ email, password }) => {
@@ -122,7 +132,7 @@ export function AppProvider({ children }) {
       await api.verifySignupCode(email, token)
     },
     updateProfile: async ({ fullName, phone }) => {
-      if (!ENV.USE_REMOTE) { setUser((u) => ({ ...u, name: fullName, phone })); return }
+      if (!ENV.USE_REMOTE) { setUser((u) => { const n = { ...u, name: fullName, phone }; saveLocalUser(n); return n }); return }
       const data = await api.updateProfile({ fullName, phone })
       setUser(toUser(data.user))
     },

@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useCallback } from 'react'
 import * as api from '../api'
+import { onDataChange } from '../api/client'
 
 // Generic async-resource hook.
 function useAsync(fn, deps = []) {
@@ -12,6 +13,7 @@ function useAsync(fn, deps = []) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [reloadTick, setReloadTick] = useState(0)
+  const [refreshTick, setRefreshTick] = useState(0) // silent refresh after an action
 
   useEffect(() => {
     let alive = true
@@ -19,14 +21,29 @@ function useAsync(fn, deps = []) {
     setError(null)
     Promise.resolve()
       .then(() => fn())
-      .then((res) => { if (alive) setData(res) })
+      // Copy so React re-renders even when local mode returns the same (mutated) array.
+      .then((res) => { if (alive) setData(Array.isArray(res) ? [...res] : res && typeof res === 'object' ? { ...res } : res) })
       .catch((err) => { if (alive) setError(err) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, reloadTick])
 
+  // After a create/update/delete: re-fetch in the background without flipping
+  // `loading`, so tables update in place instead of blinking empty.
+  useEffect(() => {
+    if (!refreshTick) return
+    let alive = true
+    Promise.resolve()
+      .then(() => fn())
+      .then((res) => { if (alive) setData(Array.isArray(res) ? [...res] : res && typeof res === 'object' ? { ...res } : res) })
+      .catch((err) => { if (alive) setError(err) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick])
+
   const reload = useCallback(() => setReloadTick((t) => t + 1), [])
+  useEffect(() => onDataChange(() => setRefreshTick((t) => t + 1)), [])
   return { data, loading, error, reload }
 }
 
@@ -99,6 +116,11 @@ export function useReservations() {
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────
+export function useSettings() {
+  const { data, loading, error, reload } = useAsync(() => api.getSettings(), [])
+  return { settings: data, loading, error, reload }
+}
+
 export function useNotifications() {
   const { data, loading, error, reload } = useAsync(() => api.getNotifications(), [])
   return {
@@ -107,4 +129,10 @@ export function useNotifications() {
     alerts: data?.alerts || [],
     loading, error, reload,
   }
+}
+
+// ── Reports: paid payments (monthly income) ──────────────────────────────────
+export function usePaidPayments() {
+  const { data, loading, error, reload } = useAsync(() => api.getPaidPayments(), [])
+  return { payments: data?.payments || [], warnings: data?.warnings || [], loading, error, reload }
 }

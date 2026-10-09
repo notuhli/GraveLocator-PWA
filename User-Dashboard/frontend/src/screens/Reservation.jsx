@@ -189,7 +189,7 @@ export function ReserveSuccessScreen({ onNavigate }) {
     <div className="screen active" style={{ background: 'var(--cream)' }}>
       <div className="success-wrap">
         <div className="success-icon" style={{ background: 'var(--pgreen)' }}>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
         <h2 style={{ fontFamily: 'var(--ff-d)', textAlign: 'center', margin: '0 0 8px' }}>Reservation Submitted</h2>
         <p className="f13 c-stone" style={{ textAlign: 'center', maxWidth: 280, margin: '0 0 20px' }}>

@@ -7,18 +7,20 @@
 // mobile, since those rely on a "Back" button there instead.
 // ─────────────────────────────────────────────────────────────────────────────
 import { NAV_ITEMS } from './BottomNav'
+import { usePrefs } from '../context/PrefsContext'
 
 export default function SideNav({ active, onNavigate }) {
+  const { t } = usePrefs()
   return (
     <nav className="side-nav">
       <div>
         <div className="side-nav-brand">
           <div className="side-nav-brand-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="#7BAE6E"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#38BDF8"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
           </div>
           <div>
             <p className="side-nav-brand-title">GraveLocator</p>
-            <p className="side-nav-brand-sub">Calbayog Memorial Park</p>
+            <p className="side-nav-brand-sub">{t('brand.sub')}</p>
           </div>
         </div>
         <div className="side-nav-items">
@@ -29,12 +31,12 @@ export default function SideNav({ active, onNavigate }) {
               onClick={() => onNavigate(item.id)}
             >
               {item.icon}
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
             </div>
           ))}
         </div>
       </div>
-      <p className="side-nav-footer">Where love outlasts a lifetime</p>
+      <p className="side-nav-footer">{t('brand.footer')}</p>
     </nav>
   )
 }

@@ -5,20 +5,20 @@ import { useApp } from '../context/AppContext'
 // ── SplashScreen ────────────────────────────────────────────────────────────
 export function SplashScreen({ onDone }) {
   return (
-    <div className="screen active" id="screen-splash" style={{ background: 'linear-gradient(160deg,#2D5016 0%,#4A7C3F 60%,#7BAE6E 100%)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+    <div className="screen active" id="screen-splash" style={{ background: 'linear-gradient(160deg,#0C4A6E 0%,#0284C7 60%,#38BDF8 100%)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
       {/* Decorative circles */}
       {[{w:300,h:300,t:-80,r:-80},{w:200,h:200,b:60,l:-60}].map((c,i) => (
         <div key={i} style={{ position:'absolute', width:c.w, height:c.h, borderRadius:'50%', border:'1px solid rgba(255,255,255,.1)', top:c.t, right:c.r, bottom:c.b, left:c.l }}/>
       ))}
       <div className="splash-logo-box">
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="#7BAE6E">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="#38BDF8">
           <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
         </svg>
       </div>
       <p className="splash-title">GraveLocator</p>
       <p className="splash-sub">Cemetery Plot Finder · Calbayog City</p>
       <div className="splash-dots" style={{ position:'absolute', bottom:60 }}>
-        {['#7BAE6E','rgba(255,255,255,.4)','rgba(255,255,255,.4)'].map((c,i) => (
+        {['#38BDF8','rgba(255,255,255,.4)','rgba(255,255,255,.4)'].map((c,i) => (
           <div key={i} className="splash-dot" style={{ background:c, animation:`pulse 1.2s ease-in-out ${i*.4}s infinite alternate` }}/>
         ))}
       </div>
@@ -28,12 +28,13 @@ export function SplashScreen({ onDone }) {
 
 // ── OnboardingScreen ─────────────────────────────────────────────────────────
 const slides = [
-  { icon:'#2D5016', bg:'rgba(45,80,22,.13)', border:'rgba(45,80,22,.2)', fill:'#2D5016', title:'Locate Cemetery Plots', desc:'Easily find any plot in Calbayog City Cemetery with our interactive map. Filter by availability, section, and more.', svgPath:<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="#2D5016"/> },
-  { icon:'#4A7C3F', bg:'rgba(74,124,63,.13)', border:'rgba(74,124,63,.2)', title:'Browse Blocks & Lots', desc:'Explore the whole park from the official map. Tap any block to see its lots, classifications, and status.', svgPath:<path d="M9 20l-5.5 2.5V6L9 3.5m0 16.5l6-2.5m-6 2.5V3.5m6 14l5.5 2.5V6L15 3.5m0 14V3.5m0 0L9 6" fill="none" stroke="#4A7C3F" strokeWidth="2"/> },
+  { icon:'#0C4A6E', bg:'rgba(12,74,110,.13)', border:'rgba(12,74,110,.2)', fill:'#0C4A6E', title:'Locate Cemetery Plots', desc:'Easily find any plot in Calbayog City Cemetery with our interactive map. Filter by availability, section, and more.', svgPath:<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="#0C4A6E"/> },
+  { icon:'#0284C7', bg:'rgba(2,132,199,.13)', border:'rgba(2,132,199,.2)', title:'Browse Blocks & Lots', desc:'Explore the whole park from the official map. Tap any block to see its lots, classifications, and status.', svgPath:<path d="M9 20l-5.5 2.5V6L9 3.5m0 16.5l6-2.5m-6 2.5V3.5m6 14l5.5 2.5V6L15 3.5m0 14V3.5m0 0L9 6" fill="none" stroke="#0284C7" strokeWidth="2"/> },
   { icon:'#C9A84C', bg:'rgba(201,168,76,.13)', border:'rgba(201,168,76,.2)', title:'Create Digital Memorials', desc:'Honor your loved ones with a digital tribute. Share memories, photos, and tributes with family and friends.', svgPath:<path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" fill="none" stroke="#C9A84C" strokeWidth="2"/> },
 ]
 
 import { useState } from 'react'
+import ForgotPassword from '../components/ForgotPassword'
 
 export function OnboardingScreen({ onNext }) {
   const [current, setCurrent] = useState(0)
@@ -78,6 +79,7 @@ export function LoginScreen({ onLogin }) {
   const [showResend, setShowResend] = useState(false)
   const [resendBusy, setResendBusy] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [forgot, setForgot] = useState(false)
   const { signIn, signUp, resendConfirmation, verifySignupCode } = useApp()
 
   function resetMessages() {
@@ -137,11 +139,33 @@ export function LoginScreen({ onLogin }) {
     }
   }
 
+  // Forgot password: same header, reset form instead of the login form.
+  if (forgot) return (
+    <div className="screen active" style={{ background:'var(--cream)' }}>
+      <div className="login-hdr">
+        <div className="login-logo-row">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="#38BDF8">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+          <h1>GraveLocator</h1>
+        </div>
+        <p>Calbayog City Cemetery Portal</p>
+      </div>
+      <div className="login-scroll">
+        <ForgotPassword
+          initialEmail={email}
+          onBack={() => { setForgot(false); resetMessages() }}
+          onDone={() => onLogin()}
+        />
+      </div>
+    </div>
+  )
+
   return (
     <div className="screen active" style={{ background:'var(--cream)' }}>
       <div className="login-hdr">
         <div className="login-logo-row">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="#7BAE6E">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="#38BDF8">
             <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
           </svg>
           <h1>GraveLocator</h1>
@@ -178,7 +202,7 @@ export function LoginScreen({ onLogin }) {
                 type="button"
                 onClick={handleResend}
                 disabled={resendBusy}
-                style={{ background:'none', border:'none', color:'#4A7C3F', fontSize:13, cursor:'pointer', textDecoration:'underline' }}
+                style={{ background:'none', border:'none', color:'#0284C7', fontSize:13, cursor:'pointer', textDecoration:'underline' }}
               >
                 {resendBusy ? 'Sending…' : "Didn't get a code? Resend"}
               </button>
@@ -195,13 +219,13 @@ export function LoginScreen({ onLogin }) {
                   type="button"
                   onClick={handleResend}
                   disabled={resendBusy}
-                  style={{ background:'none', border:'none', color:'#4A7C3F', fontSize:13, textAlign:'left', padding:0, cursor:'pointer', textDecoration:'underline' }}
+                  style={{ background:'none', border:'none', color:'#0284C7', fontSize:13, textAlign:'left', padding:0, cursor:'pointer', textDecoration:'underline' }}
                 >
                   {resendBusy ? 'Sending…' : 'Resend confirmation code'}
                 </button>
               )}
               {notice && <p style={{ color:'#166534', fontSize:13, margin:0 }}>{notice}</p>}
-              {tab==='login' && <p className="forgot">Forgot Password?</p>}
+              {tab==='login' && <p className="forgot" role="button" tabIndex={0} onClick={() => { resetMessages(); setForgot(true) }}>Forgot Password?</p>}
               <button className="btn btn-primary btn-full" onClick={handleSubmit} disabled={busy}>
                 {busy ? 'Please wait…' : tab==='login' ? 'Log In' : 'Create Account'}
               </button>
@@ -244,7 +268,7 @@ export function MapIntroScreen({ onDone }) {
     >
       <div className="pm-intro-brand">
         <div className="pm-intro-logo">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="#7BAE6E">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="#38BDF8">
             <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
           </svg>
         </div>

@@ -146,7 +146,7 @@ export default function MobileApp() {
   })
 
   const {
-    login, logout, signOut,
+    login, logout, signOut, isAuthenticated, authLoading,
     setActiveBlockId, setActiveLot, setActiveReservationId,
   } = useApp()
 
@@ -270,6 +270,14 @@ export default function MobileApp() {
     const timer = setTimeout(() => go('onboarding', {}, { replace: true }), 3400)
     return () => clearTimeout(timer)
   }, [route.screen, go])
+
+  // Signed-out guard: Back after logging out (or reloading a deep link while
+  // signed out) lands on Login instead of showing a signed-in screen.
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated && !NO_NAV_SCREENS.has(route.screen)) {
+      go('login', {}, { replace: true })
+    }
+  }, [authLoading, isAuthenticated, route.screen, go])
 
   const renderScreen = () => {
     const { screen, params, modal } = route

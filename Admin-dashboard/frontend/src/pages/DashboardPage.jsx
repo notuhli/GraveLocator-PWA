@@ -28,7 +28,7 @@ export default function DashboardPage({ onNavigate }) {
   const pct = (n) => (m.totalPlots ? Math.round((n / m.totalPlots) * 1000) / 10 : 0)
 
   const metricCards = [
-    { label: 'Total Plots', val: metricsLoading ? '…' : m.totalPlots.toLocaleString(), delta: 'Across all digitized blocks', color: '#EBF5E4', stroke: '#3A6B2F' },
+    { label: 'Total Plots', val: metricsLoading ? '…' : m.totalPlots.toLocaleString(), delta: 'Across all digitized blocks', color: '#E0F2FE', stroke: '#0369A1' },
     { label: 'Available', val: metricsLoading ? '…' : m.available.toLocaleString(), delta: `${pct(m.available)}%`, color: '#DCFCE7', stroke: '#16A34A' },
     { label: 'Occupied', val: metricsLoading ? '…' : m.occupied.toLocaleString(), delta: `${pct(m.occupied)}%`, color: '#FEE2E2', stroke: '#DC2626' },
     { label: 'Reserve Lots', val: metricsLoading ? '…' : m.reserved.toLocaleString(), delta: `${pct(m.reserved)}%`, color: '#FEF9C3', stroke: '#B45309' },
@@ -85,7 +85,7 @@ export default function DashboardPage({ onNavigate }) {
           Update a Lot
         </button>
         <button className="btn btn-ghost" onClick={() => onNavigate('memorials')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3A6B2F" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0369A1" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
           Review Memorials
         </button>
         <button className="btn btn-amber" onClick={() => onNavigate('users')}>
@@ -93,11 +93,11 @@ export default function DashboardPage({ onNavigate }) {
           Manage Users
         </button>
         <button className="btn btn-outline" onClick={() => onNavigate('reports')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3A6B2F" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0369A1" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           Generate Report
         </button>
         <button className="btn btn-outline" onClick={() => onNavigate('notifications')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3A6B2F" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0369A1" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/></svg>
           Broadcast Notification
         </button>
       </div>
@@ -119,16 +119,16 @@ export default function DashboardPage({ onNavigate }) {
                 />
               ))}
               <circle cx="80" cy="80" r="40" fill="white"/>
-              <text x="80" y="76" textAnchor="middle" fontSize="18" fontWeight="700" fill="#1E2B1A" fontFamily="Playfair Display,Georgia,serif">{m.totalPlots.toLocaleString()}</text>
-              <text x="80" y="91" textAnchor="middle" fontSize="9" fill="#6B7F64" fontFamily="DM Sans,sans-serif">Total Plots</text>
+              <text x="80" y="76" textAnchor="middle" fontSize="18" fontWeight="700" fill="#172A3A" fontFamily="Playfair Display,Georgia,serif">{m.totalPlots.toLocaleString()}</text>
+              <text x="80" y="91" textAnchor="middle" fontSize="9" fill="#5F7485" fontFamily="DM Sans,sans-serif">Total Plots</text>
             </svg>
             <div className="pie-legend">
               {arcs.map((a) => (
                 <div key={a.status} className="legend-item">
                   <div className="legend-dot" style={{ background: STATUS_META[a.status].fill === '#FFFFFF' ? '#C9CFC4' : STATUS_META[a.status].fill }}/>
                   <div>
-                    <div style={{ fontWeight: 600, color: '#1E2B1A' }}>{a.count.toLocaleString()} {STATUS_META[a.status].label}</div>
-                    <div style={{ fontSize: 11, color: '#6B7F64' }}>{pct(a.count)}%</div>
+                    <div style={{ fontWeight: 600, color: '#172A3A' }}>{a.count.toLocaleString()} {STATUS_META[a.status].label}</div>
+                    <div style={{ fontSize: 11, color: '#5F7485' }}>{pct(a.count)}%</div>
                   </div>
                 </div>
               ))}

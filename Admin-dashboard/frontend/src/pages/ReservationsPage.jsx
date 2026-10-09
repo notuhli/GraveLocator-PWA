@@ -9,8 +9,8 @@ import * as api from '../api'
 const STATUS_FILTERS = ['all', ...Object.values(RESERVATION_STATUS)]
 
 export default function ReservationsPage() {
-  const { reservations, loading, reload } = useReservations()
-  const { openModal } = useAdmin()
+  const { reservations, loading } = useReservations()
+  const { openModal, runAction, confirmAction } = useAdmin()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
 
@@ -24,7 +24,16 @@ export default function ReservationsPage() {
   // Frontend-only status changes — see BACKEND_INTEGRATION.md. Once a real
   // backend exists these call the same updateReservationStatus(id, status)
   // API function, just against a real table instead of the mock store.
-  const setReservationStatus = async (id, next) => { await api.updateReservationStatus(id, next); reload() }
+  const setReservationStatus = (id, next) =>
+    runAction(() => api.updateReservationStatus(id, next), `${id} ${RESERVATION_STATUS_META[next].label.toLowerCase()}.`)
+
+  const deleteReservation = (r) => confirmAction({
+    title: 'Delete reservation?',
+    message: `${r.id} for ${r.applicantName} (${r.blockName} · Lot ${r.lotNo}) will be removed permanently.`,
+    confirmLabel: 'Delete',
+    successMessage: `${r.id} deleted.`,
+    onConfirm: () => api.deleteReservation(r.id),
+  })
 
   return (
     <div>
@@ -46,12 +55,12 @@ export default function ReservationsPage() {
 
       <div className="card">
         <div className="table-wrap">
-          <table>
+          <table className="res-table">
             <thead>
               <tr>
                 <th>Reservation ID</th><th>Applicant</th><th>Email</th><th>Contact</th>
                 <th>Block</th><th>Lawn</th><th>Lot</th><th>Classification</th>
-                <th>Price</th><th>Reservation Date</th><th>Submitted</th><th>Status</th><th>Actions</th>
+                <th>Price</th><th>Reservation Date</th><th>Submitted</th><th>Status</th><th className="col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -69,7 +78,7 @@ export default function ReservationsPage() {
                   <td>{r.reservationDate}</td>
                   <td>{formatDate(r.createdAt?.slice(0, 10))}</td>
                   <td><span className={`badge ${RESERVATION_STATUS_META[r.status].badge}`}>{RESERVATION_STATUS_META[r.status].label}</span></td>
-                  <td><div className="action-cell">
+                  <td className="col-actions"><div className="action-cell">
                     <button className="btn btn-ghost btn-xs" onClick={() => openModal('modal-reservation-detail', r)}>Details</button>
                     {r.status === RESERVATION_STATUS.PENDING && (
                       <>
@@ -80,6 +89,7 @@ export default function ReservationsPage() {
                     {r.status === RESERVATION_STATUS.CONFIRMED && (
                       <button className="btn btn-danger btn-xs" onClick={() => setReservationStatus(r.id, RESERVATION_STATUS.CANCELLED)}>Cancel</button>
                     )}
+                    <button className="btn btn-danger btn-xs" onClick={() => deleteReservation(r)} aria-label={`Delete ${r.id}`}>Delete</button>
                   </div></td>
                 </tr>
               ))}

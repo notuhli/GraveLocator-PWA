@@ -2,11 +2,18 @@ import { useState, useEffect } from 'react'
 import BottomNav from '../components/BottomNav'
 import { useMemorials, useBlocks } from '../hooks'
 import { useApp } from '../context/AppContext'
+import { usePrefs } from '../context/PrefsContext'
+import { LANGUAGES } from '../i18n'
 import * as api from '../api'
 
-// ── MemorialsScreen ──────────────────────────────────────────────────────────
+// ── MemorialsScreen (PRIVATE) ────────────────────────────────────────────────
+// Shows ONLY the signed-in user's own memorials. Privacy is enforced in the
+// database (RLS in supabase/memorials-private.sql); the app also filters by owner.
 export function MemorialsScreen({ onNavigate, onBack, modal }) {
-  const { memorials, loading, reload } = useMemorials()
+  const { user, userKey } = useApp()
+  const { t } = usePrefs()
+  const ownerKey = userKey || user?.id // works whether AppContext exposes userKey or not
+  const { memorials, loading, reload } = useMemorials(ownerKey)
   const { blocks } = useBlocks()
   const creating = modal === 'create'
   const [fullName, setFullName] = useState('')
@@ -31,12 +38,15 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
     if (!fullName) return
     setSubmitting(true)
     try {
-      await api.createMemorial({ name: fullName, birthDate, deathDate, blockId, lotNo, quote: tribute })
+      await api.createMemorial(
+        { name: fullName, birthDate, deathDate, blockId, lotNo, quote: tribute, userId: ownerKey },
+        ownerKey,
+      )
       resetForm()
       onBack('memorials')
       reload()
     } catch (err) {
-      setNotice(err.message || 'Could not submit memorial. Please try again.')
+      setNotice(err.message || t('mem.submitErr'))
     } finally {
       setSubmitting(false)
     }
@@ -48,31 +58,31 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
         <button className="back-btn" onClick={() => { resetForm(); onBack('memorials') }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
-        <h2>Create Memorial</h2>
-      </div> 
+        <h2>{t('mem.createTitle')}</h2>
+      </div>
       <div className="form-wrap">
         <div className="upload-zone">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
-          <span>Upload Photo or Video</span>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+          <span>{t('mem.upload')}</span>
         </div>
-        <div className="field"><label className="lbl">Full Name</label><input className="inp" placeholder="Name of the deceased" value={fullName} onChange={(e)=>setFullName(e.target.value)}/></div>
-        <div className="field"><label className="lbl">Birth Date</label><input className="inp" type="date" value={birthDate} onChange={(e)=>setBirthDate(e.target.value)}/></div>
-        <div className="field"><label className="lbl">Death Date</label><input className="inp" type="date" value={deathDate} onChange={(e)=>setDeathDate(e.target.value)}/></div>
+        <div className="field"><label className="lbl">{t('mem.fullName')}</label><input className="inp" placeholder={t('mem.fullNamePh')} value={fullName} onChange={(e)=>setFullName(e.target.value)}/></div>
+        <div className="field"><label className="lbl">{t('mem.birth')}</label><input className="inp" type="date" value={birthDate} onChange={(e)=>setBirthDate(e.target.value)}/></div>
+        <div className="field"><label className="lbl">{t('mem.death')}</label><input className="inp" type="date" value={deathDate} onChange={(e)=>setDeathDate(e.target.value)}/></div>
         <div className="field">
-          <label className="lbl">Block</label>
+          <label className="lbl">{t('mem.block')}</label>
           <select className="inp" value={blockId} onChange={(e)=>setBlockId(e.target.value)}>
-            <option value="">Select a block…</option>
+            <option value="">{t('mem.selectBlock')}</option>
             {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
-        <div className="field"><label className="lbl">Lot Number</label><input className="inp" type="number" min="1" placeholder="e.g. 204" value={lotNo} onChange={(e)=>setLotNo(e.target.value)}/></div>
-        <div className="field mb-20"><label className="lbl">Tribute Message</label><textarea className="inp" rows="4" placeholder="Share a tribute or memory…" value={tribute} onChange={(e)=>setTribute(e.target.value)}/></div>
+        <div className="field"><label className="lbl">{t('mem.lot')}</label><input className="inp" type="number" min="1" placeholder={t('mem.lotPh')} value={lotNo} onChange={(e)=>setLotNo(e.target.value)}/></div>
+        <div className="field mb-20"><label className="lbl">{t('mem.tribute')}</label><textarea className="inp" rows="4" placeholder={t('mem.tributePh')} value={tribute} onChange={(e)=>setTribute(e.target.value)}/></div>
         {notice && <p style={{ color:'#DC2626', fontSize:13, margin:'0 0 12px' }}>{notice}</p>}
         <button className="btn btn-primary btn-full" onClick={handlePublish} disabled={submitting || !fullName}>
-          {submitting ? 'Submitting…' : 'Publish Memorial'}
+          {submitting ? t('mem.submitting') : t('mem.publish')}
         </button>
         <p style={{ fontSize:12, color:'var(--stone)', textAlign:'center', marginTop:10 }}>
-          Submissions are reviewed by an admin before appearing publicly.
+          {t('mem.formNote')}
         </p>
       </div>
     </div>
@@ -81,13 +91,23 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
   return (
     <div className="screen active" style={{ background:'var(--cream)' }}>
       <div className="hdr flex justify-between items-center" style={{ flexDirection:'row' }}>
-        <h2>Digital Memorials</h2>
+        <div>
+          <h2 style={{ margin:0 }}>{t('mem.title')}</h2>
+          <p className="f12" style={{ margin:'2px 0 0', color:'rgba(255,255,255,.75)' }}>{t('mem.private')}</p>
+        </div>
         <button onClick={() => onNavigate('memorials', {}, { modal: 'create' })} style={{ background:'rgba(255,255,255,.2)', border:'none', borderRadius:10, padding:'6px 14px', color:'#fff', fontFamily:'var(--ff-b)', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> {t('mem.create')}
         </button>
       </div>
       <div className="scroll-body">
-        {loading && <p className="f13 c-stone" style={{ textAlign:'center', padding:20 }}>Loading memorials…</p>}
+        {loading && <p className="f13 c-stone" style={{ textAlign:'center', padding:20 }}>{t('mem.loading')}</p>}
+        {!loading && memorials.length === 0 && (
+          <div className="memorial-card" style={{ textAlign:'center' }}>
+            <span style={{ fontSize:32 }}>🕊️</span>
+            <p style={{ margin:'6px 0 0', fontFamily:'var(--ff-d)', fontSize:16, fontWeight:700, color:'var(--charcoal)' }}>{t('mem.empty')}</p>
+            <p className="f13 c-stone" style={{ margin:'4px 0 0' }}>{t('mem.emptyBody')}</p>
+          </div>
+        )}
         {memorials.map(m => (
           <div key={m.id || m.name} className="memorial-card">
             <div className="flex gap-12 items-center mb-10">
@@ -95,6 +115,11 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
               <div>
                 <p style={{ margin:0, fontFamily:'var(--ff-d)', fontSize:16, fontWeight:700, color:'var(--charcoal)' }}>{m.name}</p>
                 <p className="f12 c-stone" style={{ margin:'2px 0 0' }}>{m.dates}</p>
+                {m.status && !['approved', 'featured'].includes(m.status) && (
+                  <span className={`badge badge-${m.status === 'rejected' ? 'rejected' : 'pending'}`} style={{ display:'inline-block', marginTop:4 }}>
+                    {m.status === 'rejected' ? t('mem.rejected') : t('mem.pending')}
+                  </span>
+                )}
               </div>
             </div>
             <p className="f13 c-slate italic lh-16" style={{ margin:'0 0 12px' }}>{m.quote}</p>
@@ -106,7 +131,7 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
                 <button className="react-btn">💬 {m.comments}</button>
               </div>
               <button className="share-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> Share
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> {t('mem.share')}
               </button>
             </div>
           </div>
@@ -118,28 +143,26 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
 }
 
 // ── ProfileScreen ────────────────────────────────────────────────────────────
-const SETTINGS_GROUPS = [
-  { label:'Account', items:[
-    { id:'edit-profile', title:'Edit Profile', sub:'Name, email, phone', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
-    { id:'my-reservations', title:'My Reservations', sub:'Track your lot reservations', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg> },
-    { id:'manage-password', title:'Manage Password', sub:'Update your password', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> },
-    { id:'notifications', title:'Notifications', sub:'Alerts and reminders', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg> },
-  ]},
-  { label:'Preferences', items:[
-    { id:'language', title:'Language', sub:'English', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg> },
-    { id:'theme', title:'App Theme', sub:'Default (Light)', icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A7C3F" strokeWidth="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg> },
-  ]},
-]
+const ICONS = {
+  edit: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  reservations: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>,
+  password: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
+  bell: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>,
+  globe: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>,
+  sun: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>,
+  moon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>,
+}
 
 const ChevronRight = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8B9EA0" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+const Check = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
 
-// Shared small modal shell — dims the background, centers a white card.
+// Shared small modal shell — dims the background, centers a card.
 function SettingsModal({ title, onClose, children }) {
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100, padding:20 }} onClick={onClose}>
-      <div style={{ background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:360 }} onClick={(e)=>e.stopPropagation()}>
+    <div className="settings-modal-backdrop" onClick={onClose}>
+      <div className="settings-modal" onClick={(e)=>e.stopPropagation()}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <h3 style={{ margin:0, fontSize:17, fontFamily:'var(--ff-d)' }}>{title}</h3>
+          <h3 style={{ margin:0, fontSize:17, fontFamily:'var(--ff-d)', color:'var(--charcoal)' }}>{title}</h3>
           <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', fontSize:20, lineHeight:1, color:'#8B9EA0' }}>&times;</button>
         </div>
         {children}
@@ -148,8 +171,57 @@ function SettingsModal({ title, onClose, children }) {
   )
 }
 
+// One tappable row in a choice list (Language / Theme).
+function ChoiceRow({ selected, title, sub, icon, onClick }) {
+  return (
+    <button type="button" className={`choice-row${selected ? ' selected' : ''}`} onClick={onClick}>
+      {icon && <span className="settings-icon" style={{ flexShrink:0 }}>{icon}</span>}
+      <span style={{ flex:1, textAlign:'left' }}>
+        <span className="settings-title" style={{ display:'block' }}>{title}</span>
+        {sub && <span className="settings-sub" style={{ display:'block' }}>{sub}</span>}
+      </span>
+      {selected && <Check />}
+    </button>
+  )
+}
+
+function LanguageModal({ onClose }) {
+  const { lang, setLang, t } = usePrefs()
+  return (
+    <SettingsModal title={t('profile.language')} onClose={onClose}>
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {LANGUAGES.map((l) => (
+          <ChoiceRow key={l.id} selected={lang === l.id} title={l.label} sub={l.native !== l.label ? l.native : null}
+            onClick={() => { setLang(l.id); onClose() }} />
+        ))}
+      </div>
+      {lang !== 'en' && <p style={{ fontSize:12, color:'var(--stone)', margin:'12px 0 0' }}>{t('lang.note')}</p>}
+    </SettingsModal>
+  )
+}
+
+function ThemeModal({ onClose }) {
+  const { theme, setTheme, t } = usePrefs()
+  const options = [
+    { id:'light', title:t('theme.light'), sub:t('theme.lightSub'), icon:ICONS.sun },
+    { id:'dark', title:t('theme.dark'), sub:t('theme.darkSub'), icon:ICONS.moon },
+    { id:'system', title:t('theme.system'), sub:t('theme.systemSub'), icon:ICONS.globe },
+  ]
+  return (
+    <SettingsModal title={t('profile.theme')} onClose={onClose}>
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {options.map((o) => (
+          <ChoiceRow key={o.id} selected={theme === o.id} title={o.title} sub={o.sub} icon={o.icon}
+            onClick={() => setTheme(o.id)} />
+        ))}
+      </div>
+    </SettingsModal>
+  )
+}
+
 function EditProfileModal({ user, onClose }) {
   const { updateProfile } = useApp()
+  const { t } = usePrefs()
   const [fullName, setFullName] = useState(user?.name || '')
   const [phone, setPhone] = useState(user?.phone || '')
   const [busy, setBusy] = useState(false)
@@ -161,22 +233,22 @@ function EditProfileModal({ user, onClose }) {
       await updateProfile({ fullName, phone })
       onClose()
     } catch (err) {
-      setError(err.message || 'Could not save changes.')
+      setError(err.message || t('edit.err'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <SettingsModal title="Edit Profile" onClose={onClose}>
+    <SettingsModal title={t('profile.edit')} onClose={onClose}>
       <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-        <input className="inp" placeholder="Full Name" value={fullName} onChange={(e)=>setFullName(e.target.value)} />
-        <input className="inp" placeholder="Phone Number" value={phone} onChange={(e)=>setPhone(e.target.value)} />
+        <input className="inp" placeholder={t('edit.fullName')} value={fullName} onChange={(e)=>setFullName(e.target.value)} />
+        <input className="inp" placeholder={t('edit.phone')} value={phone} onChange={(e)=>setPhone(e.target.value)} />
         <input className="inp" value={user?.email || ''} disabled style={{ opacity:.6 }} />
-        <p style={{ fontSize:12, color:'#8B9EA0', margin:0 }}>Email can't be changed here.</p>
+        <p style={{ fontSize:12, color:'#8B9EA0', margin:0 }}>{t('edit.emailNote')}</p>
         {error && <p style={{ color:'#DC2626', fontSize:13, margin:0 }}>{error}</p>}
         <button className="btn btn-primary btn-full" onClick={handleSave} disabled={busy}>
-          {busy ? 'Saving…' : 'Save Changes'}
+          {busy ? t('edit.saving') : t('edit.save')}
         </button>
       </div>
     </SettingsModal>
@@ -185,6 +257,7 @@ function EditProfileModal({ user, onClose }) {
 
 function ManagePasswordModal({ onClose }) {
   const { changePassword } = useApp()
+  const { t } = usePrefs()
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -193,31 +266,31 @@ function ManagePasswordModal({ onClose }) {
 
   async function handleSave() {
     setError('')
-    if (newPassword.length < 6) return setError('Password must be at least 6 characters.')
-    if (newPassword !== confirmPassword) return setError("Passwords don't match.")
+    if (newPassword.length < 6) return setError(t('pw.short'))
+    if (newPassword !== confirmPassword) return setError(t('pw.mismatch'))
 
     setBusy(true)
     try {
       await changePassword(newPassword)
       setSuccess(true)
     } catch (err) {
-      setError(err.message || 'Could not update password.')
+      setError(err.message || t('pw.err'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <SettingsModal title="Manage Password" onClose={onClose}>
+    <SettingsModal title={t('profile.password')} onClose={onClose}>
       {success ? (
-        <p style={{ color:'#166534', fontSize:14 }}>Password updated successfully.</p>
+        <p style={{ color:'#166534', fontSize:14 }}>{t('pw.success')}</p>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          <input className="inp" placeholder="New Password" type="password" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} />
-          <input className="inp" placeholder="Confirm New Password" type="password" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)} />
+          <input className="inp" placeholder={t('pw.new')} type="password" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} />
+          <input className="inp" placeholder={t('pw.confirm')} type="password" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)} />
           {error && <p style={{ color:'#DC2626', fontSize:13, margin:0 }}>{error}</p>}
           <button className="btn btn-primary btn-full" onClick={handleSave} disabled={busy}>
-            {busy ? 'Updating…' : 'Update Password'}
+            {busy ? t('pw.updating') : t('pw.update')}
           </button>
         </div>
       )}
@@ -227,22 +300,39 @@ function ManagePasswordModal({ onClose }) {
 
 export function ProfileScreen({ onNavigate, onBack, onLogout, modal }) {
   const { user } = useApp()
+  const { t, lang, theme } = usePrefs()
   const profile = user || { name:'Maria Santos', email:'m.santos@email.com', phone:'+63 912 345 6789' }
   const openModal = modal || null
 
+  const langLabel = LANGUAGES.find((l) => l.id === lang)?.label || 'English'
+  const themeLabel = theme === 'dark' ? t('theme.dark') : theme === 'system' ? t('theme.system') : t('theme.light')
+
+  const groups = [
+    { label: t('profile.account'), items: [
+      { id:'edit-profile', title:t('profile.edit'), sub:t('profile.editSub'), icon:ICONS.edit },
+      { id:'my-reservations', title:t('profile.reservations'), sub:t('profile.reservationsSub'), icon:ICONS.reservations },
+      { id:'manage-password', title:t('profile.password'), sub:t('profile.passwordSub'), icon:ICONS.password },
+      { id:'notifications', title:t('profile.notifications'), sub:t('profile.notificationsSub'), icon:ICONS.bell },
+    ]},
+    { label: t('profile.preferences'), items: [
+      { id:'language', title:t('profile.language'), sub:langLabel, icon:ICONS.globe },
+      { id:'theme', title:t('profile.theme'), sub:themeLabel, icon:theme === 'dark' ? ICONS.moon : ICONS.sun },
+    ]},
+  ]
+
   function handleItemClick(id) {
-    if (id === 'edit-profile' || id === 'manage-password') {
+    if (['edit-profile', 'manage-password', 'language', 'theme'].includes(id)) {
       onNavigate('profile', {}, { modal: id })
     } else if (id === 'my-reservations') {
       onNavigate('my-reservations')
     }
-    // 'notifications' / 'language' / 'theme': not built out yet — no-op for now.
+    // 'notifications': not built out yet — no-op for now.
   }
 
   return (
     <div className="screen active" style={{ background:'var(--cream)' }}>
       <div className="profile-hdr">
-        <h2>Profile &amp; Settings</h2>
+        <h2>{t('profile.title')}</h2>
         <div className="flex gap-12 items-center">
           <div className="avatar-box">👤</div>
           <div>
@@ -253,12 +343,12 @@ export function ProfileScreen({ onNavigate, onBack, onLogout, modal }) {
         </div>
       </div>
       <div className="scroll-body">
-        {SETTINGS_GROUPS.map(g => (
+        {groups.map(g => (
           <div key={g.label} className="settings-group">
             <p className="settings-label">{g.label}</p>
             <div className="settings-card">
               {g.items.map(item => (
-                <div key={item.title} className="settings-item" onClick={() => handleItemClick(item.id)} style={{ cursor:'pointer' }}>
+                <div key={item.id} className="settings-item" onClick={() => handleItemClick(item.id)} style={{ cursor:'pointer' }}>
                   <div className="settings-icon">{item.icon}</div>
                   <div className="flex-1">
                     <p className="settings-title">{item.title}</p>
@@ -271,13 +361,15 @@ export function ProfileScreen({ onNavigate, onBack, onLogout, modal }) {
           </div>
         ))}
         <button className="logout-btn" onClick={onLogout}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Log Out
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> {t('profile.logout')}
         </button>
       </div>
       <BottomNav active="profile" onNavigate={onNavigate} />
 
       {openModal === 'edit-profile' && <EditProfileModal user={user} onClose={() => onBack('profile')} />}
       {openModal === 'manage-password' && <ManagePasswordModal onClose={() => onBack('profile')} />}
+      {openModal === 'language' && <LanguageModal onClose={() => onBack('profile')} />}
+      {openModal === 'theme' && <ThemeModal onClose={() => onBack('profile')} />}
     </div>
   )
 }
