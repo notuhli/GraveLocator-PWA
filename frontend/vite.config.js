@@ -33,6 +33,9 @@ export default defineConfig({
       workbox: {
         // App shell (JS/CSS/HTML/images/fonts) is precached for offline use.
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
+        // The admin panel isn't part of the phone app — don't make every
+        // visitor pre-download it (it still loads normally at /admin).
+        globIgnores: ['**/AdminRoot-*.{js,css}', '**/xlsx-*.js'],
         // Never let the service worker cache API/data responses — those must
         // always hit the network so lot/plot/memorial data stays fresh.
         navigateFallbackDenylist: [/^\/api\//],

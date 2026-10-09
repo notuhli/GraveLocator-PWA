@@ -17,14 +17,15 @@ import { supabase } from '../api/supabaseClient'
 const AdminContext = createContext(null)
 
 // ── Browser history (clean URL) ──────────────────────────────────────────────
-// The address bar always stays at the site root (e.g. localhost:5174) — no
-// /admin path and no #/page hash. Each page / open block / open modal is still
+// The address bar always stays at /admin (e.g. localhost:5173/admin) — no
+// /admin/page path and no #/page hash. Each page / open block / open modal is still
 // its own history entry (stored in history.state), so the browser / Android
 // Back button steps back through the admin panel. The current page is also
 // saved per tab in sessionStorage so a refresh keeps you on the same page.
 const HISTORY_KEY = '__graveLocatorAdmin'
 const ROUTE_KEY = 'gl-admin:route'
-const CLEAN_URL = import.meta.env.BASE_URL || '/'
+// Must match ADMIN_BASE in src/App.jsx — the user app owns every other path.
+const CLEAN_URL = '/admin'
 const PAGES = ['dashboard', 'plots', 'reservations', 'users', 'memorials', 'reports', 'notifications', 'settings']
 
 // Old links like #/reports or #/plots/block/block-3 still work (read once).

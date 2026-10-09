@@ -1020,3 +1020,22 @@ html[data-theme="dark"] .logout-btn { background: rgba(220,38,38,.12); border-co
 /* ── Home: Recently Viewed ─────────────────────────────────────────────────── */
 .hm-recent-head { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 10px; }
 .hm-recent-clear { background: none; border: none; color: var(--sage); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+/* ── Form fields: always white with black text ─────────────────────────────
+   Applies to every input / select / textarea, even when the computer or
+   browser is in dark mode. Checkboxes, radios, file pickers and the see-through search bar in the
+   blue header (.search-inp-ghost) are left alone. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="hidden"], .search-inp-ghost), select, textarea) {
+  background-color: #FFFFFF;
+  color: #111827;
+}
+:where(input:not(.search-inp-ghost), textarea)::placeholder { color: #9CA3AF; opacity: 1; }
+:where(select) option { background-color: #FFFFFF; color: #111827; }
+.inp,
+html[data-theme="dark"] .inp.inp, /* doubled class: beats the dark-theme surface rule above */
+html[data-theme="dark"] :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="hidden"], .search-inp-ghost), select, textarea) {
+  background-color: #FFFFFF;
+  color: #111827;
+}
+.inp:disabled,
+html[data-theme="dark"] .inp.inp:disabled { background-color: #F3F4F6; color: #4B5563; cursor: not-allowed; }
+html[data-theme="dark"] .inp.inp::placeholder { color: #9CA3AF; }

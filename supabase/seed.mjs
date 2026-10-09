@@ -16,9 +16,9 @@
 import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
 
-import { BLOCKS } from '../User-Dashboard/frontend/src/data/blocks.js'
-import { getLotsForBlock, ALL_GRID_BLOCK_IDS } from '../User-Dashboard/frontend/src/data/lots.js'
-import { MEMORIALS } from '../User-Dashboard/frontend/src/data/memorials.js'
+import { BLOCKS } from '../frontend/src/user-dashboard/data/blocks.js'
+import { getLotsForBlock, ALL_GRID_BLOCK_IDS } from '../frontend/src/user-dashboard/data/lots.js'
+import { MEMORIALS } from '../frontend/src/user-dashboard/data/memorials.js'
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY

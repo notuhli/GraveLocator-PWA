@@ -762,3 +762,21 @@ tbody td { padding: 12px 14px; font-size: 13.5px; color: var(--charcoal); vertic
 .imp-warn { background: #FEF9C3; color: #92400E; }
 .imp-errors { background: #FEE2E2; color: #B91C1C; }
 @media (max-width: 640px) { .imp-summary { grid-template-columns: repeat(2, 1fr); } }
+/* ── Form fields: always white with black text ─────────────────────────────
+   Applies to every input / select / textarea, even when the computer or
+   browser is in dark mode. Checkboxes, radios and file pickers are left alone. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="hidden"]), select, textarea) {
+  background-color: #FFFFFF;
+  color: #111827;
+}
+:where(input, textarea)::placeholder { color: #9CA3AF; opacity: 1; }
+:where(select) option { background-color: #FFFFFF; color: #111827; }
+.modal-field input, .modal-field select, .modal-field textarea,
+.filter-input, .filter-select, .imp-cols {
+  background-color: #FFFFFF;
+  color: #111827;
+}
+input:disabled, select:disabled, textarea:disabled { background-color: #F3F4F6; color: #4B5563; cursor: not-allowed; }
+/* Keep fields inside their column in two-column dialogs (e.g. Update Lot) */
+.modal-row > * { min-width: 0; }
+.modal-field :is(input, select, textarea) { width: 100%; min-width: 0; box-sizing: border-box; }

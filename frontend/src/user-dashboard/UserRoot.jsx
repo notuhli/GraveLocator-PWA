@@ -1,5 +1,7 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+// ─────────────────────────────────────────────────────────────────────────────
+// USER DASHBOARD entry — loaded by src/App.jsx for every path except /admin.
+// (This was User-Dashboard/frontend/src/main.jsx before the merge.)
+// ─────────────────────────────────────────────────────────────────────────────
 import MobileApp from './MobileApp.jsx'
 import { AppProvider } from './context/AppContext.jsx'
 import { PrefsProvider, applySavedTheme } from './context/PrefsContext.jsx'
@@ -35,13 +37,14 @@ function lockViewport() {
 lockViewport()
 applySavedTheme() // set light/dark before first paint (no flash)
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
+// Mounted by src/App.jsx for every path except /admin.
+export default function UserRoot() {
+  return (
     <PrefsProvider>
       <AppProvider>
         <Presence />
         <MobileApp />
       </AppProvider>
     </PrefsProvider>
-  </StrictMode>,
-)
+  )
+}
