@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useCallback } from 'react'
 import * as api from '../api'
+import * as paymentsApi from '../api/paymentsApi'
 import { onDataChange } from '../api/client'
 
 // Generic async-resource hook.
@@ -135,4 +136,19 @@ export function useNotifications() {
 export function usePaidPayments() {
   const { data, loading, error, reload } = useAsync(() => api.getPaidPayments(), [])
   return { payments: data?.payments || [], warnings: data?.warnings || [], loading, error, reload }
+}
+
+// ── Payments (GCash merchant details, receipts, monthly installments) ───────
+export function usePaymentSettings() {
+  const { data, loading, error, reload } = useAsync(() => paymentsApi.getPaymentSettings(), [])
+  return { paymentSettings: data, loading, error, reload }
+}
+
+export function usePaymentOverview() {
+  const { data, loading, error, reload } = useAsync(() => paymentsApi.getPaymentOverview(), [])
+  return {
+    paymentReservations: data?.reservations || [],
+    installments: data?.installments || [],
+    loading, error, reload,
+  }
 }

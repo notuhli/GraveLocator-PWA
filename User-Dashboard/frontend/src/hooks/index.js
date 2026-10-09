@@ -88,3 +88,19 @@ export function useReservation(id) {
   )
   return { reservation: data, loading, error, reload }
 }
+
+// ── Payment ──────────────────────────────────────────────────────────────────
+// GCash account name / number / QR set by the admin (shown on the reservation form).
+export function usePaymentSettings() {
+  const { data, loading, error } = useAsync(() => api.getPaymentSettings(), [])
+  return { paymentSettings: data, loading, error }
+}
+
+// Monthly payments / adjustments on one installment reservation.
+export function useInstallmentPayments(reservationId) {
+  const { data, loading, error, reload } = useAsync(
+    () => (reservationId ? api.getInstallmentPayments(reservationId) : Promise.resolve([])),
+    [reservationId],
+  )
+  return { payments: data || [], loading, error, reload }
+}

@@ -5,6 +5,7 @@ import { USER_STATUS, USER_STATUS_META, ADMIN_ROLE, RESERVATION_STATUS, RESERVAT
 import { formatDate } from '../utils/date'
 import { plotLabel, plotShort } from '../utils/plot'
 import { peso } from '../utils/format'
+import { paymentStatusMeta, PAYMENT_OPTION_LABEL, PAYMENT_METHOD_LABEL, INSTALLMENT_TERM_LABEL } from '../config/paymentStatus'
 import * as api from '../api'
 
 // Shared shell: reads context.modal, renders nothing when it's not this modal's id.
@@ -308,7 +309,11 @@ function ReservationDetailModal() {
       {[
         ['Reservation Date', r.reservationDate],
         ['Price', peso(r.price)],
-        ['Payment Option', r.paymentOption === 'installment' ? 'Installment' : 'Cash'],
+        ['Payment Option', `${PAYMENT_OPTION_LABEL[r.paymentOption] || r.paymentOption || '—'}${r.installmentTerm ? ` · ${INSTALLMENT_TERM_LABEL[r.installmentTerm]}` : ''}`],
+        ['Paid via', PAYMENT_METHOD_LABEL[r.paymentMethod] || PAYMENT_OPTION_LABEL[r.paymentOption] || '—'],
+        ['Payment Status', r.paymentMethod === 'gcash'
+          ? paymentStatusMeta(r.paymentStatus).label
+          : r.dueNowReceivedOn ? `Cash received ${formatDate(r.dueNowReceivedOn)}` : 'Cash not yet received'],
         ['Submitted', new Date(r.createdAt).toLocaleString()],
         ['Notes', r.notes || '—'],
       ].map(([l, v]) => (

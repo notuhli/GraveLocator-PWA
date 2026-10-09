@@ -14,7 +14,7 @@
 import { local, USE_REMOTE } from './client'
 import { supabase } from './supabaseClient'
 import { MOCK_RESERVATIONS, nextReservationId } from '../data/mockReservations'
-import { RESERVATION_STATUS } from '../config/reservationStatus'
+import { RESERVATION_STATUS, PAYMENT_STATUS } from '../config/reservationStatus'
 import { getLotsForBlock } from '../data/lots'
 import { getBlockById } from '../data/blocks'
 import { STATUS, isSellable } from '../config/status'
@@ -29,14 +29,45 @@ function reservationFromRow(row) {
     lotId: row.lot_id, lotNo: row.lot_no, classification: row.classification,
     price: row.price, reservationDate: row.reservation_date,
     paymentOption: row.payment_option, notes: row.notes, status: row.status,
+    receiptPath: row.receipt_path, paymentStatus: row.payment_status,
+    paymentMethod: row.payment_method, installmentTerm: row.installment_term,
+    downPayment: row.down_payment, mcf: row.mcf, monthlyAmount: row.monthly_amount, balance: row.balance,
+    dueNowAmount: row.due_now_amount, dueNowReceivedOn: row.due_now_received_on,
     createdAt: row.created_at, updatedAt: row.updated_at,
   }
 }
 
+// Storage folder for receipts = the signed-in user's auth id (the bucket's
+// security rule only allows uploads into your own folder).
+async function receiptFolder(fallback) {
+  const { data } = await supabase.auth.getUser()
+  return data?.user?.id || fallback
+}
+// Unique file name (crypto.randomUUID only exists on HTTPS / localhost).
+const uniqueName = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
+
 // payload: { userId, applicantName, email, contactNumber, blockId, lotNo,
-//            classification, price, reservationDate, paymentOption, notes }
+//            classification, price, reservationDate, paymentOption, notes,
+//            receiptFile (when paid via GCash: the receipt photo, as a File/Blob),
+//            paymentMethod ('cash' | 'gcash' — how an installment's amount due now is paid),
+//            installmentTerm, downPayment, mcf, monthlyAmount, balance (installment only) }
 export async function createReservation(payload) {
+  // How the amount due now is paid: the option itself, or the client's pick for an installment.
+  const method = payload.paymentOption === 'installment' ? (payload.paymentMethod || 'cash') : payload.paymentOption
   if (USE_REMOTE) {
+    // GCash: upload the receipt photo first (private bucket, one folder per
+    // user), then hand its path to the RPC below.
+    let receiptPath = null
+    if (method === 'gcash') {
+      if (!payload.receiptFile) throw new Error('A GCash receipt photo is required.')
+      const type = payload.receiptFile.type || 'image/jpeg'
+      const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg'
+      receiptPath = `${await receiptFolder(payload.userId)}/${uniqueName()}.${ext}`
+      const { error: uploadError } = await supabase.storage
+        .from('payment-receipts').upload(receiptPath, payload.receiptFile, { contentType: type })
+      if (uploadError) throw uploadError
+    }
+
     // Atomic on the database side: inserts the reservation AND flips the lot
     // to 'reserve_lot' in one transaction, re-checking availability with a
     // row lock so two people can't reserve the same lot at once.
@@ -51,12 +82,22 @@ export async function createReservation(payload) {
       p_reservation_date: payload.reservationDate,
       p_payment_option: payload.paymentOption,
       p_notes: payload.notes || '',
+      p_receipt_path: receiptPath,
+      p_payment_method: method,
+      p_installment_term: payload.installmentTerm || null,
+      p_down_payment: payload.downPayment ?? null,
+      p_mcf: payload.mcf ?? null,
+      p_monthly_amount: payload.monthlyAmount ?? null,
+      p_balance: payload.balance ?? null,
     })
     if (error) throw error
     return reservationFromRow(data)
   }
 
   return local(() => {
+    if (method === 'gcash' && !payload.receiptFile) {
+      throw new Error('A GCash receipt photo is required.')
+    }
     const block = getBlockById(payload.blockId)
     const lots = getLotsForBlock(payload.blockId)
     const lot = lots.find((l) => l.lotNo === Number(payload.lotNo))
@@ -85,6 +126,14 @@ export async function createReservation(payload) {
       paymentOption: payload.paymentOption,
       notes: payload.notes || '',
       status: RESERVATION_STATUS.PENDING,
+      paymentStatus: method === 'gcash' ? PAYMENT_STATUS.PENDING_VERIFICATION : PAYMENT_STATUS.NOT_REQUIRED,
+      paymentMethod: method,
+      installmentTerm: payload.installmentTerm || null,
+      downPayment: payload.downPayment ?? null,
+      mcf: payload.mcf ?? null,
+      monthlyAmount: payload.monthlyAmount ?? null,
+      balance: payload.balance ?? null,
+      receiptUrl: payload.receiptFile ? URL.createObjectURL(payload.receiptFile) : null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -96,6 +145,32 @@ export async function createReservation(payload) {
     lot.status = STATUS.RESERVE_LOT
     return record
   })
+}
+
+// ── GCash payment details — set by the admin in Reservations → GCash Settings ─
+// Remote: the single row in public.payment_settings (see
+// supabase/payment-feature.sql); the QR image is in the public "payment-qr" bucket.
+// Local demo: placeholder details so the GCash flow can be tried without a backend.
+export async function getPaymentSettings() {
+  if (USE_REMOTE) {
+    const { data, error } = await supabase.from('payment_settings').select('*').eq('id', 1).maybeSingle()
+    if (error) throw error
+    return {
+      gcashName: data?.gcash_name || '',
+      gcashNumber: data?.gcash_number || '',
+      gcashInstructions: data?.gcash_instructions || '',
+      // ?v= makes phones load the new QR right away after the admin replaces it.
+      gcashQrUrl: data?.gcash_qr_path
+        ? `${supabase.storage.from('payment-qr').getPublicUrl(data.gcash_qr_path).data.publicUrl}?v=${encodeURIComponent(data.updated_at || '')}`
+        : null,
+    }
+  }
+  return local(() => ({
+    gcashName: 'Calbayog Memorial Park (demo)',
+    gcashNumber: '09XX XXX XXXX',
+    gcashInstructions: '',
+    gcashQrUrl: null,
+  }))
 }
 
 export async function getMyReservations(userId = 'local-demo-user') {
@@ -139,5 +214,58 @@ export async function cancelReservation(id) {
     const lot = lots.find((l) => l.lotNo === r.lotNo)
     if (lot && lot.status === STATUS.RESERVE_LOT) lot.status = STATUS.AVAILABLE
     return r
+  })
+}
+
+// ── Monthly installment payments ─────────────────────────────────────────────
+// Remote: public.installment_payments (see supabase/payment-feature.sql). A client
+// can only READ their own entries and SUBMIT a GCash payment, which stays
+// "pending" until an admin verifies the receipt. Cash payments are recorded by
+// the admin. Local demo: kept in memory.
+const LOCAL_PAYMENTS = []
+
+function paymentFromRow(row) {
+  return {
+    id: row.id, reservationId: row.reservation_id, kind: row.kind, amount: Number(row.amount),
+    method: row.method, paidOn: row.paid_on, status: row.status,
+    receiptPath: row.receipt_path, note: row.note, createdAt: row.created_at,
+  }
+}
+
+export async function getInstallmentPayments(reservationId) {
+  if (USE_REMOTE) {
+    const { data, error } = await supabase
+      .from('installment_payments').select('*').eq('reservation_id', reservationId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return data.map(paymentFromRow)
+  }
+  return local(() => LOCAL_PAYMENTS.filter((p) => p.reservationId === reservationId))
+}
+
+// payload: { reservationId, userId, amount, receiptFile }
+export async function submitMonthlyPayment(payload) {
+  if (!payload.receiptFile) throw new Error('A GCash receipt photo is required.')
+  if (USE_REMOTE) {
+    const type = payload.receiptFile.type || 'image/jpeg'
+    const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg'
+    const receiptPath = `${await receiptFolder(payload.userId)}/${uniqueName()}.${ext}`
+    const { error: uploadError } = await supabase.storage
+      .from('payment-receipts').upload(receiptPath, payload.receiptFile, { contentType: type })
+    if (uploadError) throw uploadError
+    const { data, error } = await supabase.rpc('submit_monthly_payment', {
+      p_reservation_id: payload.reservationId, p_amount: payload.amount, p_receipt_path: receiptPath,
+    })
+    if (error) throw error
+    return paymentFromRow(data)
+  }
+  return local(() => {
+    const record = {
+      id: `pay-${Date.now()}`, reservationId: payload.reservationId, kind: 'monthly',
+      amount: Number(payload.amount), method: 'gcash', paidOn: new Date().toISOString().slice(0, 10),
+      status: 'pending', receiptPath: null, note: null, createdAt: new Date().toISOString(),
+    }
+    LOCAL_PAYMENTS.unshift(record)
+    return record
   })
 }

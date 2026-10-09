@@ -13,7 +13,8 @@
     "@supabase/supabase-js": "^2.45.4",
     "leaflet": "^1.9.4",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

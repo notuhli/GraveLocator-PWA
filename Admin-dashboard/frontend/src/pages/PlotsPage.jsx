@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import SiteMap from '../components/SiteMap'
 import LotGrid from '../components/LotGrid'
+import PlotImportModal from '../components/PlotImportModal'
 import StatusFilter from '../components/StatusFilter'
 import MapLegend from '../components/MapLegend'
 import { useBlocks, useLots } from '../hooks'
@@ -8,9 +9,11 @@ import { useAdmin } from '../context/AdminContext'
 import { statusMeta, statusLabel, STATUS } from '../config/status'
 import { intermentMarks } from '../utils/format'
 import { plotLabel } from '../utils/plot'
+import { downloadPlotWorkbook } from '../utils/plotExcel'
 
 export default function PlotsPage() {
-  const { openModal, plotBlockId: blockId, openPlotBlock, closePlotBlock } = useAdmin()
+  const { openModal, plotBlockId: blockId, openPlotBlock, closePlotBlock, notify } = useAdmin()
+  const [importOpen, setImportOpen] = useState(false)
   const { blocks } = useBlocks()
   const [filter, setFilter] = useState('all')
   const [selectedLot, setSelectedLot] = useState(null)
@@ -29,6 +32,14 @@ export default function PlotsPage() {
   const counts = { __total: lots.length }
   lots.forEach((l) => { counts[l.status] = (counts[l.status] || 0) + 1 })
 
+  async function exportBlock() {
+    try {
+      await downloadPlotWorkbook(block, lots)
+    } catch (e) {
+      notify(e?.message || 'Could not create the Excel file.', 'error')
+    }
+  }
+
   const pickBlock = (b) => {
     openPlotBlock(b.id)
     setSelectedLot(null)
@@ -42,11 +53,31 @@ export default function PlotsPage() {
           <h2>Plot Management</h2>
           <p>Tap a block on the map, then a lot in the grid, to view or update it.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => openModal('modal-updatelot')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Look Up a Lot
-        </button>
+        <div className="plot-header-actions">
+          {block?.hasGrid && (
+            <button className="btn btn-ghost" onClick={exportBlock} title="Download this block's lots as an Excel file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export Excel
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={() => setImportOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import Excel
+          </button>
+          <button className="btn btn-primary" onClick={() => openModal('modal-updatelot')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Look Up a Lot
+          </button>
+        </div>
       </div>
+
+      {importOpen && (
+        <PlotImportModal
+          blocks={blocks}
+          defaultBlockId={blockId || ''}
+          onClose={() => { setImportOpen(false); setSelectedLot(null) }}
+        />
+      )}
 
       <div className="plot-layout">
         {/* Map / lot grid */}
@@ -83,9 +114,12 @@ export default function PlotsPage() {
                 <div className="lg-empty">
                   <div className="lg-empty-icon">🗺️</div>
                   <p style={{ fontSize: 13, color: 'var(--dgray)' }}>
-                    This block's individual lots haven't been transcribed into a grid yet —
-                    only the block-level area is tracked for now.
+                    This block has no plot data yet. Upload the office's Excel list of lots
+                    to create its grid.
                   </p>
+                  <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => setImportOpen(true)}>
+                    Import {block.name} from Excel
+                  </button>
                 </div>
               )}
 

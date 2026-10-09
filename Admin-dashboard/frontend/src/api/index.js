@@ -137,6 +137,81 @@ export function updateLotStatus(blockId, lotNo, status, intermentCount) {
   })
 }
 
+// ── Excel import (Plot Management → Import Excel) ───────────────────────────
+// Lot ids that have a pending/confirmed reservation — the import preview warns
+// before changing them, and "replace" never deletes them.
+export async function getActiveReservedLotIds(blockIds) {
+  if (!USE_REMOTE || !blockIds?.length) return new Set()
+  const { data, error } = await supabase
+    .from('reservations').select('lot_id')
+    .in('block_id', blockIds).in('status', ['pending', 'confirmed'])
+  if (error) throw error
+  return new Set((data || []).map((r) => r.lot_id).filter(Boolean))
+}
+
+// Saves one block's lots from the Excel file in a single transaction
+// (supabase/plot-import.sql → admin_import_lots). Lots in the file are added
+// or updated; with `replace`, lots NOT in the file are removed (except ones
+// with an active reservation). The block becomes a grid block, its max lot is
+// recalculated, and `gridCols` (if given) sets how many columns the grid has.
+// Returns { inserted, updated, unchanged, deleted, kept }.
+export function importLots(blockId, rows, { replace = false, gridCols = null } = {}) {
+  return mutate(async () => {
+    const payload = rows.map((r) => ({
+      lot_no: r.lotNo ?? null,
+      extra_index: r.lotNo == null ? r.extraIndex : null,
+      classification: r.classification,
+      status: r.status,
+      interment_count: Number(r.intermentCount) || 0,
+    }))
+    const cols = Number(gridCols) > 0 ? Math.round(Number(gridCols)) : null
+
+    if (USE_REMOTE) {
+      const { data, error } = await supabase.rpc('admin_import_lots', {
+        p_block_id: blockId, p_rows: payload, p_replace: !!replace, p_grid_cols: cols,
+      })
+      if (error) {
+        if (/admin_import_lots/i.test(error.message || '')) {
+          throw new Error('The import function is missing — run supabase/plot-import.sql in the Supabase SQL Editor first.')
+        }
+        throw error
+      }
+      return data
+    }
+
+    // Local demo mode: update the in-memory seed so the grid reflects the file.
+    return local(() => {
+      const block = getBlockById(blockId)
+      const lots = getLotsForBlock(blockId)
+      const result = { inserted: 0, updated: 0, unchanged: 0, deleted: 0, kept: 0 }
+      const ids = new Set()
+      payload.forEach((p) => {
+        const id = p.lot_no != null ? `${blockId}-${p.lot_no}` : `${blockId}-x${p.extra_index}`
+        ids.add(id)
+        const next = { id, blockId, lotNo: p.lot_no, classification: p.classification, status: p.status, intermentCount: p.interment_count, verified: true }
+        const cur = lots.find((l) => l.id === id)
+        if (!cur) { lots.push(next); result.inserted += 1 }
+        else if (cur.status !== next.status || cur.classification !== next.classification || (cur.intermentCount || 0) !== next.intermentCount) {
+          Object.assign(cur, next); result.updated += 1
+        } else result.unchanged += 1
+      })
+      if (replace) {
+        for (let i = lots.length - 1; i >= 0; i--) {
+          if (!ids.has(lots[i].id)) { lots.splice(i, 1); result.deleted += 1 }
+        }
+      }
+      // Numbered lots first (in order), then number-less cells — like the plans.
+      lots.sort((a, b) => (a.lotNo == null) - (b.lotNo == null) || (a.lotNo ?? 0) - (b.lotNo ?? 0) || a.id.localeCompare(b.id))
+      if (block) {
+        block.hasGrid = lots.length > 0
+        block.maxLot = lots.reduce((m, l) => (l.lotNo > m ? l.lotNo : m), 0) || null
+        if (cols) block.grid = { cols }
+      }
+      return result
+    })
+  })
+}
+
 // ── Pricing ──────────────────────────────────────────────────────────────────
 export function getPricing() {
   // NOTE: pricing is static reference data — not yet moved to Supabase.

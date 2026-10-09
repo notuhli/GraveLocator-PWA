@@ -10,7 +10,10 @@ import { getLotsForBlock } from '../data/lots'
 import { PRICING, CASH_PRICING, INSTALLMENT_FACTORS, INTERMENT_FEES, PRICING_NOTES } from '../data/pricing'
 import { INSTALLMENT_INTEREST } from '../config/constants'
 import { LEGEND } from '../data/legend'
-import { createReservation, getMyReservations, getReservationById, cancelReservation } from './reservationApi'
+import {
+  createReservation, getMyReservations, getReservationById, cancelReservation,
+  getPaymentSettings, getInstallmentPayments, submitMonthlyPayment,
+} from './reservationApi'
 
 // Row shape from Supabase (snake_case) → the shape screens already expect (camelCase).
 function blockFromRow(row) {
@@ -249,4 +252,8 @@ export async function resetPasswordWithCode(email, token, newPassword) {
 
 // ── Reservations — re-exported so screens only ever import from api/ ────────
 // (see reservationApi.js for the actual mock implementation + backend notes)
-export { createReservation, getMyReservations, getReservationById, cancelReservation }
+export {
+  createReservation, getMyReservations, getReservationById, cancelReservation,
+  // Payment (GCash merchant details, receipts, monthly installments)
+  getPaymentSettings, getInstallmentPayments, submitMonthlyPayment,
+}
