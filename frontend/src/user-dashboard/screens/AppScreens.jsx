@@ -301,7 +301,7 @@ function ManagePasswordModal({ onClose }) {
 export function ProfileScreen({ onNavigate, onBack, onLogout, modal }) {
   const { user } = useApp()
   const { t, lang, theme } = usePrefs()
-  const profile = user || { name:'Maria Santos', email:'m.santos@email.com', phone:'+63 912 345 6789' }
+  const profile = user || { name:'', email:'', phone:'' }
   const openModal = modal || null
 
   const langLabel = LANGUAGES.find((l) => l.id === lang)?.label || 'English'
@@ -338,7 +338,7 @@ export function ProfileScreen({ onNavigate, onBack, onLogout, modal }) {
           <div>
             <p className="profile-name">{profile.name}</p>
             <p className="profile-sub">{profile.email}</p>
-            <p className="profile-sub">{profile.phone}</p>
+            {profile.phone && <p className="profile-sub">{profile.phone}</p>}
           </div>
         </div>
       </div>

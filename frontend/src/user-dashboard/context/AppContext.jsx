@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // APP CONTEXT — auth + lightweight app state.
 // When VITE_USE_REMOTE=true, auth is backed by Supabase Auth (real sessions,
-// persisted across reloads). Otherwise it falls back to the original local
-// stub (login() just flips a flag) so the app still runs with zero setup.
+// persisted across reloads). Otherwise it falls back to a local stub login.
+// No demo user: the displayed name always comes from the account that logged in.
 // ─────────────────────────────────────────────────────────────────────────────
 import { createContext, useContext, useState, useMemo, useEffect, useCallback } from 'react'
 import { ENV } from '../config/constants'
@@ -10,6 +10,20 @@ import { supabase } from '../api/supabaseClient'
 import * as api from '../api'
 
 const AppContext = createContext(null)
+
+// Local-stub session survives a refresh (Supabase keeps its own session when remote).
+// Key bumped to v2 so any old "Maria Santos" session saved in the browser is ignored.
+const LOCAL_USER_KEY = 'gl:session:v2'
+const LEGACY_USER_KEY = 'gl:session'
+try { localStorage.removeItem(LEGACY_USER_KEY) } catch { /* ignore */ }
+
+function loadLocalUser() {
+  if (ENV.USE_REMOTE) return null
+  try { return JSON.parse(localStorage.getItem(LOCAL_USER_KEY)) } catch { return null }
+}
+function saveLocalUser(u) {
+  try { u ? localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u)) : localStorage.removeItem(LOCAL_USER_KEY) } catch { /* ignore */ }
+}
 
 // Recently viewed is stored per user on this device, newest first.
 const RECENT_LIMIT = 5
@@ -21,14 +35,21 @@ function saveRecent(userKey, list) {
   try { localStorage.setItem(recentKey(userKey), JSON.stringify(list)) } catch { /* storage full / blocked */ }
 }
 
-const DEFAULT_USER = {
-  name: 'Maria Santos',
-  email: 'm.santos@email.com',
-  phone: '+63 912 345 6789',
+// Name fallback when an account has no full_name: use the part of the email before "@".
+const nameFromEmail = (email) => (email ? email.split('@')[0] : '')
+
+// Supabase user → app user. Never falls back to a demo name.
+function toUser(u) {
+  return {
+    id: u.id,
+    name: u.user_metadata?.full_name || nameFromEmail(u.email),
+    email: u.email || '',
+    phone: u.user_metadata?.phone || '',
+  }
 }
 
 export function AppProvider({ children }) {
-  const [user, setUser] = useState(null)          // null = logged out
+  const [user, setUser] = useState(loadLocalUser) // null = logged out
   const [authLoading, setAuthLoading] = useState(ENV.USE_REMOTE)
   const [activeBlockId, setActiveBlockId] = useState(null) // map: which block is open
   const [activeLot, setActiveLot] = useState(null)         // map → plot-detail handoff
@@ -68,15 +89,6 @@ export function AppProvider({ children }) {
     })
   }, [activeLot, addRecentView])
 
-  function toUser(u) {
-    return {
-      id: u.id,
-      name: u.user_metadata?.full_name || DEFAULT_USER.name,
-      email: u.email,
-      phone: u.user_metadata?.phone || '',
-    }
-  }
-
   // Restore + subscribe to the Supabase session when running against real auth.
   useEffect(() => {
     if (!ENV.USE_REMOTE || !supabase) return
@@ -98,31 +110,52 @@ export function AppProvider({ children }) {
     isAuthenticated: !!user,
     authLoading,
 
-    // Local-stub login (used when VITE_USE_REMOTE=false).
-    login: (profile) => setUser({ ...DEFAULT_USER, ...(profile || {}) }),
-    logout: () => setUser(null),
+    // Local-stub login (used when VITE_USE_REMOTE=false) — uses only what was entered.
+    login: (profile = {}) => {
+      const email = profile.email || ''
+      const u = {
+        id: profile.id || email || undefined,
+        name: profile.name || profile.fullName || nameFromEmail(email),
+        email,
+        phone: profile.phone || '',
+      }
+      saveLocalUser(u)
+      setUser(u)
+    },
+    logout: () => { saveLocalUser(null); setUser(null) },
 
-    // Real Supabase auth — call these from the login/signup screens when remote.
+    // Real Supabase auth. Sets the user right away so the new name shows
+    // immediately — no refresh needed.
     signIn: async ({ email, password }) => {
-      await api.signIn({ email, password })
+      const data = await api.signIn({ email, password })
+      const authUser = data?.user || data?.session?.user
+      if (authUser) setUser(toUser(authUser))
+      else if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) setUser(toUser(session.user))
+      }
     },
     signUp: async ({ email, password, fullName, phone }) => {
       // Return whether a real session came back — if email confirmation is
       // required, Supabase creates the account but does NOT log them in yet.
       const data = await api.signUp({ email, password, fullName, phone })
-      return { confirmedImmediately: !!data.session }
+      if (data?.session?.user) setUser(toUser(data.session.user))
+      return { confirmedImmediately: !!data?.session }
     },
     signOut: async () => {
+      setUser(null)
       await api.signOut()
     },
     resendConfirmation: async (email) => {
       await api.resendConfirmation(email)
     },
     verifySignupCode: async (email, token) => {
-      await api.verifySignupCode(email, token)
+      const data = await api.verifySignupCode(email, token)
+      const authUser = data?.user || data?.session?.user
+      if (authUser) setUser(toUser(authUser))
     },
     updateProfile: async ({ fullName, phone }) => {
-      if (!ENV.USE_REMOTE) { setUser((u) => ({ ...u, name: fullName, phone })); return }
+      if (!ENV.USE_REMOTE) { setUser((u) => { const n = { ...u, name: fullName, phone }; saveLocalUser(n); return n }); return }
       const data = await api.updateProfile({ fullName, phone })
       setUser(toUser(data.user))
     },
