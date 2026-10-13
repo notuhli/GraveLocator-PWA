@@ -39,6 +39,11 @@ export default function MapPreview({ blocks = [] }) {
       boxZoom: false,
       keyboard: false,
       tap: false,
+      // Static preview: no zoom/fade animations, so leaving Home mid-animation
+      // can't throw Leaflet's "_leaflet_pos of undefined" error.
+      zoomAnimation: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false,
     })
     L.tileLayer(
       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -67,7 +72,7 @@ export default function MapPreview({ blocks = [] }) {
     pts.forEach((c) => L.marker(c, { icon: miniPin('#EA4335', '#B31412'), interactive: false }).addTo(group))
     L.marker(GATE.coords, { icon: miniPin('#1E8E3E', '#0D652D'), interactive: false }).addTo(group)
 
-    map.fitBounds(L.latLngBounds([GATE.coords, ...pts]), { padding: [22, 22], maxZoom: 19 })
+    map.fitBounds(L.latLngBounds([GATE.coords, ...pts]), { padding: [22, 22], maxZoom: 19, animate: false })
   }, [blocks])
 
   return <div ref={elRef} className="hm-hero-map" aria-label="Satellite map of Calbayog Memorial Park" />

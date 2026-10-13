@@ -1,23 +1,41 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PLOT EXCEL — read an office Excel/CSV of lots, and write one back out.
 //
-// Expected columns (header names are flexible, any order, any sheet):
-//   Block | Lot No | Classification | Status | Interments
+// Header names are flexible (any order, any sheet). Two layouts both work:
 //
-//   • Block        "Block 8", "8", "block-8", "2A" or the lawn name. Optional:
-//                  if missing, the sheet name (e.g. a sheet called "Block 8")
-//                  or the block picked in the import dialog is used.
-//   • Lot No       204 or "Lot 204". Leave blank for a coloured cell that has
-//                  no lot number (a tree on a pathway, etc.).
-//   • Classification  Regular, Special Regular, Deluxe, Premium, Garden,
-//                  Columbary 1&2, Columbary 3&4. Blank = keep the current one.
-//   • Status       Available/Vacant, Sold, With Interment, Reserve Lot,
-//                  Not For Sale, Delinquent, Trees, Lamp Post, Block-Off.
-//                  Blank = keep the current one (new lots become Available).
-//   • Interments   0, 1, 2 … or tally marks "|" / "||".
+//  A) GraveLocator layout
+//     Block | Lot No | Classification | Status | Interments | Name of Deceased 1 | Name of Deceased 2 …
 //
-// SheetJS is loaded only when an import/export actually runs, so it adds
-// nothing to the dashboard's first load.
+//  B) The office's SALES CONTROL sheet (one sheet per block, e.g. "Block 7")
+//     Lot No. | Class | Buyer's Name | C.O. No. | Remarks | Date of Sale | W/ Interment |
+//     Name of Deceased 1 | Name of Deceased 2
+//     → no Status column: status comes from Buyer's Name + W/ Interment:
+//         TREE / LAMP POST in Buyer's Name (or Class) → Trees / Lamp Post
+//         X / XX in W/ Interment                       → With Interment (1 / 2)
+//         a buyer's name                               → Sold
+//         no buyer                                     → Available
+//     Buyer's name, C.O. No., remarks and dates are NOT saved — the lots table
+//     is public, so only what a visitor should see (status + names of the
+//     deceased) goes in.
+//
+//  • Block        "Block 8", "8", "block-8", "2A" or the lawn name. Optional:
+//                 if missing, the sheet name (e.g. "Block 7") or the block
+//                 picked in the import dialog is used.
+//  • Lot No       204 or "Lot 204". Blank = a coloured cell with no number.
+//  • Classification / Class   Regular, Special Regular (Spl. Reg., S. Reg., …),
+//                 Deluxe (De Luxe), Premium, Garden, Columbary 1&2 / 3&4.
+//                 Blank = keep the current one.
+//  • Status       Available/Vacant, Sold, With Interment, Reserve Lot,
+//                 Not For Sale, Delinquent, Trees, Lamp Post, Block-Off.
+//  • Interments   0, 1, 2 … or tally marks: X / XX, | / ||.
+//  • Name of Deceased 1, 2, …  one name (or "A & B") per cell. If the file has
+//                 these columns, a blank row clears the lot's names; if the
+//                 file has no name columns, saved names are kept.
+//
+// A lot listed more than once (e.g. the sheet was pasted twice) uses the LAST
+// row; the preview lists the lots whose repeated rows disagree.
+//
+// SheetJS is loaded only when an import/export runs.
 // ─────────────────────────────────────────────────────────────────────────────
 import { STATUS, STATUS_ORDER, statusLabel } from '../config/status'
 import { CLASSIFICATION_ORDER } from '../config/constants'
@@ -25,6 +43,7 @@ import { CLASSIFICATION_ORDER } from '../config/constants'
 const loadXlsx = () => import('xlsx')
 
 const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim()
 
 // ── Header aliases ───────────────────────────────────────────────────────────
 const HEADERS = {
@@ -32,8 +51,10 @@ const HEADERS = {
   lotNo: ['lot', 'lotno', 'lotnumber', 'lotnum', 'no', 'number', 'lotid'],
   classification: ['classification', 'class', 'type', 'lottype', 'category'],
   status: ['status', 'lotstatus', 'state'],
-  interments: ['interments', 'interment', 'intermentcount', 'noofinterments', 'noofinterment', 'burials', 'graves', 'interred'],
+  interments: ['interments', 'interment', 'intermentcount', 'noofinterments', 'noofinterment', 'winterment', 'withinterment', 'burials', 'graves'],
+  buyer: ['buyersname', 'buyername', 'buyer', 'owner', 'ownername', 'ownersname', 'lotowner', 'purchaser'],
 }
+const isDeceasedHeader = (h) => /^(nameofdeceased|nameofthedeceased|deceased|decedent|nameofinterred|interredname|interred)/.test(h)
 
 // ── Status aliases → STATUS values ───────────────────────────────────────────
 const STATUS_ALIASES = {
@@ -51,6 +72,15 @@ const STATUS_LOOKUP = {}
 Object.entries(STATUS_ALIASES).forEach(([value, list]) => list.forEach((a) => { STATUS_LOOKUP[a] = value }))
 STATUS_ORDER.forEach((s) => { STATUS_LOOKUP[norm(statusLabel(s))] = s; STATUS_LOOKUP[norm(s)] = s })
 
+// Words that can appear in Buyer's Name / Class instead of a person's name.
+const MARKER_STATUSES = new Set([STATUS.TREES, STATUS.LAMP_POST, STATUS.NOT_FOR_SALE, STATUS.BLOCK_OFF, STATUS.RESERVE_LOT, STATUS.DELINQUENT])
+function markerStatus(v) {
+  const key = norm(v)
+  if (!key || key.length < 3 || /,/.test(String(v))) return null // single letters / "Last, First" are names
+  const s = STATUS_LOOKUP[key]
+  return s && MARKER_STATUSES.has(s) ? s : null
+}
+
 export function parseStatus(v) {
   const key = norm(v)
   if (!key) return { value: null }
@@ -59,14 +89,21 @@ export function parseStatus(v) {
 
 const CLASS_LOOKUP = {}
 CLASSIFICATION_ORDER.forEach((c) => { CLASS_LOOKUP[norm(c)] = c })
+const SPECIAL_REGULAR = CLASS_LOOKUP[norm('Special Regular')]
+;['specialreg', 'splreg', 'splregular', 'specreg', 'specregular', 'sreg', 'sregular', 'spreg', 'spregular', 'specialregular']
+  .forEach((k) => { CLASS_LOOKUP[k] = SPECIAL_REGULAR })
+CLASS_LOOKUP.reg = CLASS_LOOKUP[norm('Regular')]
+CLASS_LOOKUP.dlx = CLASS_LOOKUP[norm('Deluxe')]
 CLASS_LOOKUP.columbary12 = CLASS_LOOKUP[norm('Columbary 1&2')]
 CLASS_LOOKUP.columbary34 = CLASS_LOOKUP[norm('Columbary 3&4')]
-CLASS_LOOKUP.specialreg = CLASS_LOOKUP[norm('Special Regular')]
 
 export function parseClassification(v) {
   const key = norm(v)
   if (!key) return { value: null }
-  return CLASS_LOOKUP[key] ? { value: CLASS_LOOKUP[key] } : { error: `Unknown classification "${v}"` }
+  if (CLASS_LOOKUP[key]) return { value: CLASS_LOOKUP[key] }
+  const marker = markerStatus(v)            // e.g. Class = "TREE"
+  if (marker) return { value: null, marker }
+  return { error: `Unknown classification "${v}"` }
 }
 
 export function parseLotNo(v) {
@@ -74,17 +111,21 @@ export function parseLotNo(v) {
   if (typeof v === 'number') {
     return Number.isInteger(v) && v > 0 ? { value: v } : { error: `Lot No "${v}" must be a whole number` }
   }
-  const m = String(v).trim().match(/^(?:lot\s*(?:no\.?)?\s*#?\s*)?(\d+)$/i)
-  return m && Number(m[1]) > 0 ? { value: Number(m[1]) } : { error: `Lot No "${v}" is not a number` }
+  const s = String(v).trim()
+  const m = s.match(/^(?:lot\s*(?:no\.?)?\s*#?\s*)?(\d+)$/i)
+  if (m && Number(m[1]) > 0) return { value: Number(m[1]) }
+  if (/^\d+\s*-?\s*[a-z]$/i.test(s)) return { error: `Lot No "${s}" has a letter — lettered lots (like 640-A) aren't supported yet, so this row was skipped` }
+  return { error: `Lot No "${v}" is not a number` }
 }
 
 export function parseInterments(v) {
   if (v === '' || v == null) return { value: null }
   if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? { value: v } : { error: `Interments "${v}" must be 0 or more` }
-  const s = String(v).trim()
-  if (/^[|Il1]+$/.test(s) && !/^\d+$/.test(s)) return { value: s.length } // tally marks
+  const s = String(v).replace(/\s+/g, '')
+  if (!s) return { value: null }
   if (/^\d+$/.test(s)) return { value: Number(s) }
-  return { error: `Interments "${v}" is not a number` }
+  if (/^[xX|Il]+$/.test(s)) return { value: s.length } // tally marks: X, XX, |, ||
+  return { error: `Interments "${v}" is not a number or X / XX` }
 }
 
 // "Block 8" / "8" / "block-8" / "B8" / "Infinite Lawn" → block object
@@ -107,14 +148,17 @@ function findHeader(rows) {
       const idx = cells.findIndex((c) => aliases.includes(c))
       if (idx !== -1) col[field] = idx
     })
-    if (col.lotNo != null && (col.status != null || col.interments != null || col.classification != null)) return { index: i, col }
+    const deceased = cells.map((c, idx) => (isDeceasedHeader(c) ? idx : -1)).filter((idx) => idx !== -1)
+    const hasData = col.status != null || col.interments != null || col.classification != null || col.buyer != null || deceased.length
+    if (col.lotNo != null && hasData) return { index: i, col, deceased }
   }
   return null
 }
 
 // Reads every sheet and returns { rows, errors, sheets }.
-//   rows:   [{ blockId, lotNo, classification, status, intermentCount, where }]
-//   errors: [{ where, message }]   where = "Sheet1 row 12"
+//   rows:   [{ blockId, lotNo, classification, status, intermentCount, deceasedNames, where }]
+//           deceasedNames = null when the sheet has no name columns (keep saved names)
+//   errors: [{ where, message }]   where = "Block 7 row 12"
 export async function readPlotFile(file, blocks, fallbackBlockId) {
   const XLSX = await loadXlsx()
   const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
@@ -129,16 +173,16 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
     const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: true })
     const header = findHeader(grid)
     if (!header) return // not a lot sheet (e.g. an instructions sheet)
-    sheets.push(sheetName)
+    sheets.push(sheetName.trim())
 
     const sheetBlock = matchBlock(sheetName, blocks)
-    const { col } = header
+    const { col, deceased } = header
     const cell = (r, field) => (col[field] == null ? '' : r[col[field]])
 
     for (let i = header.index + 1; i < grid.length; i++) {
       const r = grid[i]
       if (!r || r.every((c) => String(c).trim() === '')) continue
-      const where = `${sheetName} row ${firstRow + i + 1}`
+      const where = `${sheetName.trim()} row ${firstRow + i + 1}`
       const fail = (message) => errors.push({ where, message })
 
       const blockCell = cell(r, 'block')
@@ -148,7 +192,7 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
         if (!block) { fail(`Unknown block "${blockCell}"`); continue }
       } else {
         block = sheetBlock || blocks.find((b) => b.id === fallbackBlockId) || null
-        if (!block) { fail('No block — add a Block column or pick a block in the import dialog'); continue }
+        if (!block) { fail('No block — add a Block column, name the sheet after the block, or pick a block in the import dialog'); continue }
       }
 
       const lot = parseLotNo(cell(r, 'lotNo'))
@@ -157,53 +201,82 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
       const inter = parseInterments(cell(r, 'interments'))
       const bad = [lot, st, cls, inter].find((x) => x.error)
       if (bad) { fail(bad.error); continue }
-      if (lot.value == null && !st.value) continue // nothing usable on this row
 
-      let status = st.value
+      const buyer = clean(cell(r, 'buyer'))
+      const names = deceased.length ? deceased.map((idx) => clean(r[idx])).filter(Boolean) : null
+      const marker = markerStatus(buyer) || cls.marker || null
+
+      // Status: explicit Status column → TREE/LAMP POST marker → interments → buyer.
+      let status = st.value || marker
       let intermentCount = inter.value
-      if (intermentCount > 0 && status === STATUS.AVAILABLE) {
-        fail(`Lot ${lot.value ?? '(no number)'} is Available but has ${intermentCount} interment(s) — change the status to Sold / With Interment, or set Interments to 0`)
+      if (status === STATUS.AVAILABLE && (intermentCount > 0 || names?.length)) {
+        fail(`Lot ${lot.value ?? '(no number)'} is Available but has interment(s) or names — change the status to Sold / With Interment, or clear them`)
         continue
       }
-      if (intermentCount > 0 && (!status || status === STATUS.SOLD)) status = STATUS.WITH_INTERMENT
+      if (!intermentCount && names?.length && (!status || status === STATUS.SOLD || status === STATUS.WITH_INTERMENT)) {
+        intermentCount = names.length
+      }
+      if (!status) {
+        if (intermentCount > 0) status = STATUS.WITH_INTERMENT
+        else if (buyer) status = STATUS.SOLD
+        else if (col.buyer != null) status = STATUS.AVAILABLE
+      }
+      if (intermentCount > 0 && status === STATUS.SOLD) status = STATUS.WITH_INTERMENT
       if (status === STATUS.WITH_INTERMENT && !intermentCount) intermentCount = 1
+      if (lot.value == null && !status) continue // nothing usable on this row
 
-      rows.push({ blockId: block.id, lotNo: lot.value, classification: cls.value, status, intermentCount, where })
+      rows.push({
+        blockId: block.id, lotNo: lot.value, classification: cls.value, status, intermentCount,
+        deceasedNames: names, where,
+      })
     }
   })
 
   return { rows, errors, sheets }
 }
 
+const sameNames = (a, b) => (a || []).join('\n') === (b || []).join('\n')
+const rowSig = (r) => JSON.stringify([r.classification, r.status, r.intermentCount, r.deceasedNames])
+
 // Groups parsed rows by block and compares them with the lots already saved.
 //   existingByBlock: { [blockId]: lots[] }
 //   reservedIds:     Set of lot ids that have a pending/confirmed reservation
+// Returns { plans, errors, repeats: { conflicts: [{ lotNo, block, wheres, used }], identical } }
 export function buildImportPlan(rows, blocks, existingByBlock, reservedIds = new Set()) {
   const byBlock = new Map()
-  const errors = []
+  const conflicts = []
+  let identical = 0
 
   rows.forEach((row) => {
-    if (!byBlock.has(row.blockId)) byBlock.set(row.blockId, { rows: [], seen: new Set(), extra: 0 })
+    if (!byBlock.has(row.blockId)) byBlock.set(row.blockId, { byNo: new Map(), extras: [] })
     const g = byBlock.get(row.blockId)
-    if (row.lotNo != null) {
-      if (g.seen.has(row.lotNo)) { errors.push({ where: row.where, message: `Lot ${row.lotNo} appears more than once` }); return }
-      g.seen.add(row.lotNo)
-      g.rows.push({ ...row, id: `${row.blockId}-${row.lotNo}` })
-    } else {
-      g.rows.push({ ...row, id: `${row.blockId}-x${g.extra}`, extraIndex: g.extra })
-      g.extra += 1
-    }
+    if (row.lotNo == null) { g.extras.push(row); return }
+    const prev = g.byNo.get(row.lotNo)
+    if (!prev) { g.byNo.set(row.lotNo, { row, wheres: [row.where], differs: false }); return }
+    // Listed again → the later row wins.
+    if (rowSig(prev.row) !== rowSig(row)) prev.differs = true
+    else identical += 1
+    prev.wheres.push(row.where)
+    prev.row = row
   })
 
   const plans = [...byBlock.entries()].map(([blockId, g]) => {
     const block = blocks.find((b) => b.id === blockId)
+    byBlock.get(blockId).byNo.forEach((entry, lotNo) => {
+      if (entry.differs) conflicts.push({ block: block?.name || blockId, lotNo, wheres: entry.wheres, used: entry.wheres[entry.wheres.length - 1] })
+    })
+    const fileRows = [
+      ...[...g.byNo.values()].map((e) => ({ ...e.row, id: `${blockId}-${e.row.lotNo}` })).sort((a, b) => a.lotNo - b.lotNo),
+      ...g.extras.map((r, i) => ({ ...r, id: `${blockId}-x${i}`, extraIndex: i })),
+    ]
+
     const existing = existingByBlock[blockId] || []
     const byId = new Map(existing.map((l) => [l.id, l]))
-    const fileIds = new Set(g.rows.map((r) => r.id))
-    let added = 0, changed = 0, same = 0
+    const fileIds = new Set(fileRows.map((r) => r.id))
+    let added = 0, changed = 0, same = 0, withNames = 0
     const warnings = []
 
-    const final = g.rows.map((r) => {
+    const final = fileRows.map((r) => {
       const cur = byId.get(r.id)
       const next = {
         id: r.id,
@@ -211,10 +284,16 @@ export function buildImportPlan(rows, blocks, existingByBlock, reservedIds = new
         classification: r.classification || cur?.classification || block?.classifications?.[0] || 'Regular',
         status: r.status || cur?.status || STATUS.AVAILABLE,
         intermentCount: r.intermentCount ?? cur?.intermentCount ?? 0,
+        deceasedNames: r.deceasedNames,            // null = keep saved names
         extraIndex: r.extraIndex,
       }
+      const namesAfter = next.deceasedNames ?? cur?.deceasedNames ?? []
+      if (namesAfter.length) withNames += 1
       if (!cur) added += 1
-      else if (cur.classification !== next.classification || cur.status !== next.status || (cur.intermentCount || 0) !== next.intermentCount) {
+      else if (
+        cur.classification !== next.classification || cur.status !== next.status ||
+        (cur.intermentCount || 0) !== next.intermentCount || !sameNames(cur.deceasedNames, namesAfter)
+      ) {
         changed += 1
         if (reservedIds.has(r.id) && cur.status !== next.status) {
           warnings.push(`Lot ${r.lotNo ?? '(no number)'} has an active reservation — status will change from ${statusLabel(cur.status)} to ${statusLabel(next.status)}`)
@@ -230,7 +309,7 @@ export function buildImportPlan(rows, blocks, existingByBlock, reservedIds = new
       blockId,
       block,
       rows: final,
-      added, changed, same,
+      added, changed, same, withNames,
       missing: missing.length,
       removable,
       protectedCount: missing.length - removable,
@@ -239,23 +318,24 @@ export function buildImportPlan(rows, blocks, existingByBlock, reservedIds = new
     }
   }).sort((a, b) => blocks.indexOf(a.block) - blocks.indexOf(b.block))
 
-  return { plans, errors }
+  conflicts.sort((a, b) => a.block.localeCompare(b.block) || a.lotNo - b.lotNo)
+  return { plans, errors: [], repeats: { conflicts, identical } }
 }
 
 // ── Export (current block → .xlsx) / blank template ─────────────────────────
-const COLUMNS = ['Block', 'Lot No', 'Classification', 'Status', 'Interments']
-
 function addHelpSheet(XLSX, wb) {
   const help = [
     ['Column', 'Accepted values'],
-    ['Block', 'Block 1 … Block 9, Block 2A, or the lawn name. Optional if the sheet is named after the block.'],
+    ['Block', 'Block 1 … Block 9, Block 2A, or the lawn name. Optional if the sheet is named after the block (e.g. "Block 7").'],
     ['Lot No', 'A whole number (e.g. 204). Leave blank for a coloured cell with no lot number.'],
-    ['Classification', CLASSIFICATION_ORDER.join(', ') + '. Blank = keep current.'],
-    ['Status', STATUS_ORDER.map(statusLabel).join(', ') + '. "Vacant" = Available. Blank = keep current.'],
-    ['Interments', 'Number of burials: 0, 1, 2 … (or tally marks | / ||). Any interment on a Sold lot makes it "With Interment".'],
+    ['Classification', CLASSIFICATION_ORDER.join(', ') + '. "De Luxe", "Spl. Reg.", "S. Regular" also work. Blank = keep current.'],
+    ['Status', STATUS_ORDER.map(statusLabel).join(', ') + '. "Vacant" = Available. Blank = worked out from the other columns.'],
+    ['Interments', 'Number of burials: 0, 1, 2 … or X / XX. Any interment on a Sold lot makes it "With Interment".'],
+    ['Name of Deceased 1, 2 …', 'One name per cell, e.g. "Rosales, Romeo". Add more columns if a lot has more names. Shown on Lot Details and searchable in the app.'],
+    ["Buyer's Name (optional)", 'Only used to work out the status when there is no Status column: a name = Sold, blank = Available, TREE / LAMP POST = Trees / Lamp Post. It is not saved.'],
   ]
   const ws = XLSX.utils.aoa_to_sheet(help)
-  ws['!cols'] = [{ wch: 16 }, { wch: 110 }]
+  ws['!cols'] = [{ wch: 24 }, { wch: 110 }]
   XLSX.utils.book_append_sheet(wb, ws, 'How to fill')
 }
 
@@ -263,16 +343,21 @@ export async function downloadPlotWorkbook(block, lots) {
   const XLSX = await loadXlsx()
   const wb = XLSX.utils.book_new()
   const name = block ? block.name : 'Block 8'
+  const cls = block?.classifications?.[0] || 'Regular'
+  const nameCols = Math.max(2, ...(lots || []).map((l) => (l.deceasedNames || []).length))
+  const columns = ['Block', 'Lot No', 'Classification', 'Status', 'Interments',
+    ...Array.from({ length: nameCols }, (_, i) => `Name of Deceased ${i + 1}`)]
+  const pad = (arr) => [...arr, ...Array(nameCols - arr.length).fill('')]
   const data = lots && lots.length
-    ? lots.map((l) => [name, l.lotNo ?? '', l.classification, statusLabel(l.status), l.intermentCount || 0])
+    ? lots.map((l) => [name, l.lotNo ?? '', l.classification, statusLabel(l.status), l.intermentCount || 0, ...pad(l.deceasedNames || [])])
     : [
-        [name, 1, block?.classifications?.[0] || 'Regular', 'Sold', 1],
-        [name, 2, block?.classifications?.[0] || 'Regular', 'Available', 0],
-        [name, 3, block?.classifications?.[0] || 'Regular', 'With Interment', 2],
-        [name, '', block?.classifications?.[0] || 'Regular', 'Trees', 0],
+        [name, 1, cls, 'Sold', 0, ...pad([])],
+        [name, 2, cls, 'Available', 0, ...pad([])],
+        [name, 3, cls, 'With Interment', 2, ...pad(['Dela Cruz, Juan', 'Dela Cruz, Maria'])],
+        [name, '', cls, 'Trees', 0, ...pad([])],
       ]
-  const ws = XLSX.utils.aoa_to_sheet([COLUMNS, ...data])
-  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 16 }, { wch: 16 }, { wch: 11 }]
+  const ws = XLSX.utils.aoa_to_sheet([columns, ...data])
+  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 16 }, { wch: 16 }, { wch: 11 }, ...Array(nameCols).fill({ wch: 28 })]
   XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31))
   addHelpSheet(XLSX, wb)
   const file = lots && lots.length ? `${name.replace(/\s+/g, '-')}-plots.xlsx` : `${name.replace(/\s+/g, '-')}-template.xlsx`

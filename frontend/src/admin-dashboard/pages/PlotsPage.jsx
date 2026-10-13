@@ -23,7 +23,8 @@ export default function PlotsPage() {
   useEffect(() => {
     if (!selectedLot) return
     const fresh = lots.find((l) => l.lotNo === selectedLot.lotNo)
-    if (fresh && (fresh.status !== selectedLot.status || fresh.intermentCount !== selectedLot.intermentCount)) setSelectedLot({ ...selectedLot, ...fresh })
+    const namesChanged = (fresh?.deceasedNames || []).join('\n') !== (selectedLot.deceasedNames || []).join('\n')
+    if (fresh && (fresh.status !== selectedLot.status || fresh.intermentCount !== selectedLot.intermentCount || namesChanged)) setSelectedLot({ ...selectedLot, ...fresh })
   }, [lots, selectedLot])
 
   const block = blocks.find((b) => b.id === blockId) || null
@@ -151,6 +152,14 @@ export default function PlotsPage() {
                         <div className="detail-row">
                           <span className="detail-label">Interments</span>
                           <span className="detail-val">{selectedLot.intermentCount} ({marks})</span>
+                        </div>
+                      )}
+                      {selectedLot.deceasedNames?.length > 0 && (
+                        <div className="detail-row" style={{ alignItems: 'flex-start' }}>
+                          <span className="detail-label">Deceased</span>
+                          <span className="detail-val" style={{ textAlign: 'right' }}>
+                            {selectedLot.deceasedNames.map((n, i) => <div key={i}>{n}</div>)}
+                          </span>
                         </div>
                       )}
                       <div className="detail-row">

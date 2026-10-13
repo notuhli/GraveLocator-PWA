@@ -153,7 +153,6 @@ export function MapScreen({ onNavigate, onBack, routeBlockId }) {
   const { blocks } = useBlocks()
   const { activeBlockId, setActiveBlockId, setActiveLot } = useApp()
   const { t } = usePrefs()
-  const [selected, setSelected] = useState(null)
   const [filter, setFilter] = useState('all')
 
   // Deep-link: if Search set a block, open straight into its grid.
@@ -161,14 +160,15 @@ export function MapScreen({ onNavigate, onBack, routeBlockId }) {
     if (routeBlockId && routeBlockId !== activeBlockId) setActiveBlockId(routeBlockId)
   }, [routeBlockId, activeBlockId, setActiveBlockId])
 
-  useEffect(() => {
-    if (activeBlockId && blocks.length) {
-      const b = blocks.find(x => x.id === activeBlockId)
-      if (b) setSelected(b)
-    }
-  }, [activeBlockId, blocks])
 
-  const { lots } = useLots(selected?.id)
+  // When a block is already chosen (URL / Back / Search), go straight to its
+  // grid — never flash the park map first (that also caused Leaflet's
+  // "_leaflet_pos" error when the half-drawn map was removed).
+  const wantedId = routeBlockId || activeBlockId
+  const view = wantedId ? blocks.find((x) => x.id === wantedId) || null : null
+  const waitingForBlock = !!wantedId && !view
+
+  const { lots } = useLots(view?.id)
 
   // Status counts for the filter chips.
   const counts = lots.reduce((acc, l) => {
@@ -183,16 +183,15 @@ export function MapScreen({ onNavigate, onBack, routeBlockId }) {
   }
 
   const backToPark = () => {
-    setSelected(null)
     setActiveBlockId(null)
     onBack('map')
   }
 
   const openLot = (lot) => {
     const activeLot = {
-      blockId: selected.id,
-      blockName: selected.name,
-      lawnName: selected.lawnName,
+      blockId: view.id,
+      blockName: view.name,
+      lawnName: view.lawnName,
       lotNo: lot.lotNo,
       classification: lot.classification,
       status: lot.status,
@@ -203,7 +202,7 @@ export function MapScreen({ onNavigate, onBack, routeBlockId }) {
   }
 
   // ── Lot-grid view ──────────────────────────────────────────────────────────
-  if (selected) {
+  if (view) {
     return (
       <div className="screen active" style={{ background: 'var(--cream)' }}>
         <div className="hdr hdr-row" style={{ flexShrink: 0 }}>
@@ -211,16 +210,16 @@ export function MapScreen({ onNavigate, onBack, routeBlockId }) {
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <div>
-            <h2 style={{ margin: 0 }}>{selected.name}</h2>
-            {selected.lawnName && <p className="f12" style={{ margin: 0, color: 'rgba(255,255,255,.75)' }}>{selected.lawnName}</p>}
+            <h2 style={{ margin: 0 }}>{view.name}</h2>
+            {view.lawnName && <p className="f12" style={{ margin: 0, color: 'rgba(255,255,255,.75)' }}>{view.lawnName}</p>}
           </div>
         </div>
 
-        {selected.hasGrid ? (
+        {view.hasGrid ? (
           <div className="pm-zoom" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <StatusFilter value={filter} onChange={setFilter} counts={counts} />
             <div className="lg-grid-scroll">
-              <LotGrid blockId={selected.id} cols={selected.grid?.cols} filter={filter} onSelectLot={openLot} />
+              <LotGrid blockId={view.id} cols={view.grid?.cols} filter={filter} onSelectLot={openLot} />
             </div>
             <MapLegend compact />
           </div>
@@ -229,12 +228,22 @@ export function MapScreen({ onNavigate, onBack, routeBlockId }) {
             <span className="lg-empty-icon">🗺️</span>
             <p className="fw7 f15 c-charcoal" style={{ margin: '0 0 4px' }}>{t('map.notDigitized')}</p>
             <p className="f13 c-stone" style={{ margin: 0, textAlign: 'center', maxWidth: 260 }}>
-              {t('map.notDigitizedBody', { block: `${selected.name}${selected.lawnName ? ` (${selected.lawnName})` : ''}` })}
+              {t('map.notDigitizedBody', { block: `${view.name}${view.lawnName ? ` (${view.lawnName})` : ''}` })}
             </p>
             <button className="btn btn-outline btn-sm" style={{ marginTop: 16 }} onClick={backToPark}>{t('map.backToPark')}</button>
           </div>
         )}
 
+        <BottomNav active="map" onNavigate={onNavigate} />
+      </div>
+    )
+  }
+
+  if (waitingForBlock) {
+    return (
+      <div className="screen active" style={{ background: 'var(--cream)' }}>
+        <div className="hdr"><h2 style={{ margin: 0 }}>{t('map.title')}</h2></div>
+        <div className="lg-grid-msg" style={{ padding: 24 }}>…</div>
         <BottomNav active="map" onNavigate={onNavigate} />
       </div>
     )

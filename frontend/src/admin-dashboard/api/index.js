@@ -57,6 +57,7 @@ function lotFromRow(row) {
     id: row.id, blockId: row.block_id, lotNo: row.lot_no,
     classification: row.classification, status: row.status,
     intermentCount: row.interment_count, verified: row.verified,
+    deceasedNames: row.deceased_names || [],
   }
 }
 
@@ -108,10 +109,13 @@ export async function getLot(blockId, lotNo) {
 // `intermentCount` is optional — pass it when status === STATUS.WITH_INTERMENT
 // so the number of burials in the lot is recorded alongside the status.
 // Requires the signed-in Supabase user to have profiles.role = 'admin' (RLS).
-export function updateLotStatus(blockId, lotNo, status, intermentCount) {
+// `deceasedNames` is optional too — an array of names replaces the lot's list
+// (pass [] to clear it); leave it undefined to keep the saved names.
+export function updateLotStatus(blockId, lotNo, status, intermentCount, deceasedNames) {
   return mutate(async () => {
   const patch = { status }
   if (intermentCount != null) patch.interment_count = Number(intermentCount)
+  if (Array.isArray(deceasedNames)) patch.deceased_names = deceasedNames.map((n) => String(n).trim()).filter(Boolean)
 
   if (USE_REMOTE) {
     const { data, error } = await supabase
@@ -131,6 +135,7 @@ export function updateLotStatus(blockId, lotNo, status, intermentCount) {
     if (lot) {
       lot.status = status
       if (intermentCount != null) lot.intermentCount = Number(intermentCount)
+      if (patch.deceased_names) lot.deceasedNames = patch.deceased_names
     }
     return lot || null
   })
@@ -163,6 +168,7 @@ export function importLots(blockId, rows, { replace = false, gridCols = null } =
       classification: r.classification,
       status: r.status,
       interment_count: Number(r.intermentCount) || 0,
+      deceased_names: Array.isArray(r.deceasedNames) ? r.deceasedNames : null, // null = keep saved names
     }))
     const cols = Number(gridCols) > 0 ? Math.round(Number(gridCols)) : null
 
@@ -188,10 +194,11 @@ export function importLots(blockId, rows, { replace = false, gridCols = null } =
       payload.forEach((p) => {
         const id = p.lot_no != null ? `${blockId}-${p.lot_no}` : `${blockId}-x${p.extra_index}`
         ids.add(id)
-        const next = { id, blockId, lotNo: p.lot_no, classification: p.classification, status: p.status, intermentCount: p.interment_count, verified: true }
         const cur = lots.find((l) => l.id === id)
+        const names = p.deceased_names ?? cur?.deceasedNames ?? []
+        const next = { id, blockId, lotNo: p.lot_no, classification: p.classification, status: p.status, intermentCount: p.interment_count, deceasedNames: names, verified: true }
         if (!cur) { lots.push(next); result.inserted += 1 }
-        else if (cur.status !== next.status || cur.classification !== next.classification || (cur.intermentCount || 0) !== next.intermentCount) {
+        else if (cur.status !== next.status || cur.classification !== next.classification || (cur.intermentCount || 0) !== next.intermentCount || (cur.deceasedNames || []).join('\n') !== names.join('\n')) {
           Object.assign(cur, next); result.updated += 1
         } else result.unchanged += 1
       })

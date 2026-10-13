@@ -13,6 +13,16 @@ import { useApp } from './context/AppContext'
 import { ENV } from './config/constants'
 
 const HISTORY_KEY = '__graveLocator'
+// Our history entries look like { __graveLocator: true, index, screen, params, modal }.
+// Returns that entry (or null for entries that aren't ours).
+const readEntry = (state) => (state && state[HISTORY_KEY] ? state : null)
+
+// Clean address bar: it always shows just the site (e.g. localhost:5173) —
+// no /map/lot/block-7/533. Each screen is still its own history entry (kept
+// in history.state), so Back, the phone's Back button and refresh all work.
+// Old deep links like /map/lot/block-7/533 still open the right screen once,
+// then the address is tidied to "/".
+const CLEAN_URL = '/'
 
 // These paths are deliberately kept in the existing single-screen architecture.
 // The History API supplies the browser/PWA navigation stack without requiring a
@@ -135,14 +145,18 @@ function buildHistoryState(screen, params, modal, index) {
 }
 
 export default function MobileApp() {
-  const initialRoute = parseLocation(window.location)
-  const initialHistoryState = window.history.state?.[HISTORY_KEY]
+  const initialHistoryState = readEntry(window.history.state)
+  // After a refresh the address is just "/", so the saved history entry —
+  // not the URL — says which screen we were on.
+  const initialRoute = initialHistoryState
+    ? { screen: initialHistoryState.screen, params: initialHistoryState.params || {}, modal: initialHistoryState.modal || null }
+    : parseLocation(window.location)
   const initialIndex = Number.isInteger(initialHistoryState?.index) ? initialHistoryState.index : 0
 
   const [route, setRoute] = useState({
-    screen: initialRoute.screen,
-    params: initialHistoryState?.params || initialRoute.params,
-    modal: initialHistoryState?.modal || initialRoute.modal,
+    screen: initialRoute.unknown ? 'home' : initialRoute.screen,
+    params: initialRoute.unknown ? {} : initialRoute.params,
+    modal: initialRoute.unknown ? null : initialRoute.modal,
   })
 
   const {
@@ -154,28 +168,33 @@ export default function MobileApp() {
   // app a stable marker so UI Back buttons can distinguish an internal route
   // from a directly opened page.
   useEffect(() => {
-    const parsed = parseLocation(window.location)
-    const existing = window.history.state?.[HISTORY_KEY]
+    const existing = readEntry(window.history.state)
+    let start = existing
+      ? { screen: existing.screen, params: existing.params || {}, modal: existing.modal || null }
+      : parseLocation(window.location)
 
-    if (parsed.unknown) {
-      const nextState = buildHistoryState('home', {}, null, 0)
-      window.history.replaceState(nextState, '', SCREEN_PATHS.home)
-      setRoute({ screen: 'home', params: {}, modal: null })
-      return
+    if (start.unknown) {
+      start = { screen: 'home', params: {}, modal: null }
+      setRoute(start)
     }
 
-    if (!existing) {
-      window.history.replaceState(
-        buildHistoryState(parsed.screen, parsed.params, parsed.modal, 0),
-        '',
-        window.location.pathname + window.location.search,
-      )
-    }
+    // Keep (or create) this entry's saved screen, and tidy the address to "/".
+    window.history.replaceState(
+      existing || buildHistoryState(start.screen, start.params, start.modal, 0),
+      '',
+      CLEAN_URL,
+    )
 
-    // Apply route parameters from a direct/deep URL to the existing app state.
-    if (parsed.params.blockId) setActiveBlockId(parsed.params.blockId)
-    if (parsed.params.reservationId != null) setActiveReservationId(parsed.params.reservationId)
-  }, [setActiveBlockId, setActiveReservationId])
+    // Apply the starting screen's parameters to the app state.
+    const params = start.params || {}
+    if (params.activeLot) {
+      setActiveLot(params.activeLot)
+      setActiveBlockId(params.activeLot.blockId || null)
+    } else if (params.blockId) {
+      setActiveBlockId(params.blockId)
+    }
+    if (params.reservationId != null) setActiveReservationId(params.reservationId)
+  }, [setActiveBlockId, setActiveLot, setActiveReservationId])
 
   const applyRouteState = useCallback((nextRoute) => {
     setRoute(nextRoute)
@@ -202,29 +221,30 @@ export default function MobileApp() {
 
   const go = useCallback((screen, params = {}, options = {}) => {
     const modal = options.modal || null
-    const currentState = window.history.state?.[HISTORY_KEY]
+    const currentState = readEntry(window.history.state)
     const currentIndex = Number.isInteger(currentState?.index) ? currentState.index : initialIndex
     const nextIndex = options.replace ? currentIndex : currentIndex + 1
-    const nextPath = pathFor(screen, params, modal)
-    const currentPath = window.location.pathname + window.location.search
-    if (!options.replace && nextPath === currentPath) return
+    // Same screen + same block/lot/modal as now? Don't stack a duplicate entry.
+    const nextKey = pathFor(screen, params, modal)
+    const currentKey = currentState ? pathFor(currentState.screen, currentState.params || {}, currentState.modal) : null
+    if (!options.replace && nextKey === currentKey) return
 
     const nextState = buildHistoryState(screen, params, modal, nextIndex)
 
     if (options.replace) {
-      window.history.replaceState(nextState, '', nextPath)
+      window.history.replaceState(nextState, '', CLEAN_URL)
     } else {
-      window.history.pushState(nextState, '', nextPath)
+      window.history.pushState(nextState, '', CLEAN_URL)
     }
 
     applyRouteState({ screen, params, modal })
   }, [applyRouteState, initialIndex])
 
   const goBack = useCallback((fallback = 'home', fallbackParams = {}) => {
-    const currentState = window.history.state?.[HISTORY_KEY]
+    const currentState = readEntry(window.history.state)
     const index = Number.isInteger(currentState?.index) ? currentState.index : 0
 
-    if (currentState?.[HISTORY_KEY] && index > 0) {
+    if (currentState && index > 0) {
       window.history.back()
       return
     }
@@ -236,27 +256,16 @@ export default function MobileApp() {
 
   useEffect(() => {
     const handlePopState = (event) => {
-      const state = event.state?.[HISTORY_KEY]
-      const parsed = parseLocation(window.location)
+      const state = readEntry(event.state)
 
-      if (parsed.unknown) {
-        // A history entry outside GraveLocator is allowed to remain outside the
-        // app. If the browser lands on an unknown internal URL, recover safely.
-        const next = { screen: 'home', params: {}, modal: null }
-        window.history.replaceState(
-          buildHistoryState('home', {}, null, state?.index ?? 0),
-          '',
-          SCREEN_PATHS.home,
-        )
-        applyRouteState(next)
+      if (!state) {
+        // An entry without a saved screen (shouldn't happen) — recover to Home.
+        window.history.replaceState(buildHistoryState('home', {}, null, 0), '', CLEAN_URL)
+        applyRouteState({ screen: 'home', params: {}, modal: null })
         return
       }
 
-      applyRouteState({
-        screen: state?.screen || parsed.screen,
-        params: state?.params || parsed.params,
-        modal: state?.modal || parsed.modal,
-      })
+      applyRouteState({ screen: state.screen, params: state.params || {}, modal: state.modal || null })
     }
 
     window.addEventListener('popstate', handlePopState)

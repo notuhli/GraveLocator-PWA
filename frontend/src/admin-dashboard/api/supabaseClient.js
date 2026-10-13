@@ -11,7 +11,11 @@ import { ENV } from '../config/constants'
 
 export const supabase =
   ENV.SUPABASE_URL && ENV.SUPABASE_ANON_KEY
-    ? createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY)
+    ? createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
+        // Both dashboards now run on the same site, so give the admin its own
+        // saved session — signing in/out here doesn't sign the user app in/out.
+        auth: { storageKey: 'gl-admin-auth' },
+      })
     : null
 
 if (ENV.USE_REMOTE && !supabase) {

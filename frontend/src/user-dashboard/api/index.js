@@ -6,7 +6,7 @@
 import { local, USE_REMOTE } from './client'
 import { supabase } from './supabaseClient'
 import { BLOCKS, PARK_MAP, getBlockById } from '../data/blocks'
-import { getLotsForBlock } from '../data/lots'
+import { getLotsForBlock, ALL_GRID_BLOCK_IDS } from '../data/lots'
 import { PRICING, CASH_PRICING, INSTALLMENT_FACTORS, INTERMENT_FEES, PRICING_NOTES } from '../data/pricing'
 import { INSTALLMENT_INTEREST } from '../config/constants'
 import { LEGEND } from '../data/legend'
@@ -32,6 +32,7 @@ function lotFromRow(row) {
     id: row.id, blockId: row.block_id, lotNo: row.lot_no,
     classification: row.classification, status: row.status,
     intermentCount: row.interment_count, verified: row.verified,
+    deceasedNames: row.deceased_names || [],
   }
 }
 function memorialFromRow(row) {
@@ -87,6 +88,31 @@ export async function getLot(blockId, lotNo) {
     return data ? lotFromRow(data) : null
   }
   return local(() => getLotsForBlock(blockId).find((l) => l.lotNo === Number(lotNo)) || null)
+}
+
+// ── Search: names of the deceased ───────────────────────────────────────────
+// Finds lots whose interred names match what was typed — every word in any
+// order ("romeo rosales" → "Rosales, Romeo"), plus close spellings on the
+// server ("rosalez" → "Rosales"). Uses supabase/plot-import.sql → search_deceased.
+// Returns [{ lotId, blockId, lotNo, classification, status, intermentCount, name }]
+export async function searchDeceased(query, limit = 30) {
+  const q = String(query || '').trim()
+  if (q.length < 2) return []
+  if (USE_REMOTE) {
+    const { data, error } = await supabase.rpc('search_deceased', { p_query: q, p_limit: limit })
+    if (error) throw error
+    return (data || []).map((r) => ({
+      lotId: r.lot_id, blockId: r.block_id, lotNo: r.lot_no, classification: r.classification,
+      status: r.status, intermentCount: r.interment_count, name: r.name,
+    }))
+  }
+  // Local demo data: same "every word, any order" match (no fuzzy spelling).
+  const words = q.toLowerCase().replace(/[^a-z0-9ñ]+/g, ' ').split(' ').filter(Boolean)
+  return local(() => ALL_GRID_BLOCK_IDS.flatMap((blockId) => getLotsForBlock(blockId).flatMap((l) =>
+    (l.deceasedNames || [])
+      .filter((n) => words.every((w) => n.toLowerCase().includes(w)))
+      .map((name) => ({ lotId: l.id, blockId, lotNo: l.lotNo, classification: l.classification, status: l.status, intermentCount: l.intermentCount, name })),
+  )).slice(0, limit))
 }
 
 // ── Pricing (static reference data — not stored in Supabase; edit pricing.js) ─

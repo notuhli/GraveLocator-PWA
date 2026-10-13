@@ -85,6 +85,7 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
     ? plan.plans.reduce((t, p) => ({ rows: t.rows + p.rows.length, added: t.added + p.added, changed: t.changed + p.changed, removable: t.removable + p.removable }), { rows: 0, added: 0, changed: 0, removable: 0 })
     : null
   const warnings = plan ? plan.plans.flatMap((p) => p.warnings.map((w) => `${p.block?.name || p.blockId} · ${w}`)) : []
+  const repeats = plan?.repeats || { conflicts: [], identical: 0 }
   const changeCount = totals ? totals.added + totals.changed + (replace ? totals.removable : 0) : 0
   const colsChanged = plan ? plan.plans.some((p) => String(cols[p.blockId] || '') !== String(p.block?.grid?.cols || '')) : false
   const importLabel = changeCount > 0
@@ -97,7 +98,8 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
         <h3>Import Plots from Excel</h3>
         <p>
           Add lots to blocks that have no data yet, or update existing lots. Columns:
-          <strong> Block, Lot No, Classification, Status, Interments</strong>.
+          <strong> Block, Lot No, Classification, Status, Interments, Name of Deceased 1, 2…</strong>
+          {' '}— the office's Sales Control sheet (Lot No., Class, Buyer's Name, W/ Interment, Name of Deceased) works as-is.
         </p>
 
         {error && <div className="pay-note pay-note-err imp-note">{error}</div>}
@@ -155,6 +157,7 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
                       <th>New</th>
                       <th>Updated</th>
                       <th>Same</th>
+                      <th title="Lots that will have names of the deceased">Names</th>
                       <th title="Lots saved now but not in the file">Not in file</th>
                       <th title="How many lots per row in the grid. Blank = fit to screen.">Grid cols</th>
                     </tr>
@@ -170,6 +173,7 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
                         <td className="imp-new">{p.added}</td>
                         <td className="imp-upd">{p.changed}</td>
                         <td>{p.same}</td>
+                        <td>{p.withNames}</td>
                         <td>
                           {p.missing}
                           {replace && p.missing > 0 && (
@@ -204,6 +208,25 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
                 <summary>{warnings.length} lot{warnings.length > 1 ? 's' : ''} with an active reservation will change</summary>
                 <ul>{warnings.slice(0, MAX_LIST).map((w, i) => <li key={i}>{w}</li>)}</ul>
                 {warnings.length > MAX_LIST && <div className="pay-sub">…and {warnings.length - MAX_LIST} more</div>}
+              </details>
+            )}
+
+            {(repeats.conflicts.length > 0 || repeats.identical > 0) && (
+              <details className="imp-list imp-warn" open={repeats.conflicts.length > 0 && repeats.conflicts.length <= 10}>
+                <summary>
+                  {repeats.conflicts.length > 0
+                    ? `${repeats.conflicts.length} lot${repeats.conflicts.length > 1 ? 's are' : ' is'} listed more than once with different details — the last row is used`
+                    : `${repeats.identical} repeated row${repeats.identical > 1 ? 's' : ''} with the same details were ignored`}
+                </summary>
+                {repeats.conflicts.length > 0 && (
+                  <ul>
+                    {repeats.conflicts.slice(0, MAX_LIST).map((c) => (
+                      <li key={`${c.block}-${c.lotNo}`}><strong>{c.block} · Lot {c.lotNo}:</strong> {c.wheres.length}× ({c.wheres.map((w) => w.replace(/^.* row /, 'row ')).join(', ')}) — using {c.used.replace(/^.* row /, 'row ')}</li>
+                    ))}
+                  </ul>
+                )}
+                {repeats.conflicts.length > MAX_LIST && <div className="pay-sub">…and {repeats.conflicts.length - MAX_LIST} more</div>}
+                {repeats.conflicts.length > 0 && repeats.identical > 0 && <div className="pay-sub">{repeats.identical} other repeated rows had the same details and were ignored.</div>}
               </details>
             )}
 

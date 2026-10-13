@@ -34,6 +34,7 @@ function UpdateLotModal() {
   const [lotNo, setLotNo] = useState('')
   const [status, setStatus] = useState(STATUS.AVAILABLE)
   const [intermentCount, setIntermentCount] = useState(1)
+  const [names, setNames] = useState('')           // names of the deceased, one per line
   const [saving, setSaving] = useState(false)
 
   const needsIntermentCount = status === STATUS.WITH_INTERMENT
@@ -47,7 +48,22 @@ function UpdateLotModal() {
     // Default to the lot's existing count when it already has interments,
     // otherwise start at 1 (about to record the first burial).
     setIntermentCount(record?.intermentCount > 0 ? record.intermentCount : 1)
+    setNames('')
   }, [isOpen, record])
+
+  // Load the lot's saved names (and interment count) once a lot is picked.
+  useEffect(() => {
+    if (!isOpen || !blockId || !lotNo) return undefined
+    let alive = true
+    api.getLot(blockId, Number(lotNo))
+      .then((lot) => {
+        if (!alive) return
+        setNames((lot?.deceasedNames || []).join('\n'))
+        if (lot?.intermentCount > 0) setIntermentCount(lot.intermentCount)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [isOpen, blockId, lotNo])
 
   if (!isOpen) return null
   const gridBlocks = blocks.filter((b) => b.hasGrid)
@@ -57,7 +73,12 @@ function UpdateLotModal() {
     if (needsIntermentCount && (!intermentCount || Number(intermentCount) < 1)) return
     setSaving(true)
     const ok = await runAction(
-      () => api.updateLotStatus(blockId, Number(lotNo), status, needsIntermentCount ? intermentCount : undefined),
+      () => api.updateLotStatus(
+        blockId, Number(lotNo), status,
+        needsIntermentCount ? intermentCount : undefined,
+        // With Interment → save the names; Available → clear them; others → keep.
+        needsIntermentCount ? names.split('\n') : status === STATUS.AVAILABLE ? [] : undefined,
+      ),
       `Lot ${lotNo} updated.`,
     )
     setSaving(false)
@@ -100,6 +121,20 @@ function UpdateLotModal() {
             />
             <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
               How many people are buried in this lot.
+            </p>
+          </div>
+        )}
+        {needsIntermentCount && (
+          <div className="modal-field">
+            <label>Name(s) of Deceased</label>
+            <textarea
+              rows={3}
+              placeholder={'One name per line, e.g.\nDela Cruz, Juan'}
+              value={names}
+              onChange={e => setNames(e.target.value)}
+            />
+            <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
+              Shown on the lot's details and searchable in the user app.
             </p>
           </div>
         )}

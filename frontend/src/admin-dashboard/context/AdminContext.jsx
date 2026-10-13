@@ -114,14 +114,28 @@ export function AdminProvider({ children }) {
     }
   }
 
+  // Only accounts with profiles.role = 'admin' may use the admin dashboard.
+  // Anyone else (e.g. a normal user account) is signed out of the ADMIN
+  // session only and sent back to the admin login with a message — their
+  // user-app login is untouched (separate session, see api/supabaseClient.js).
   async function loadSessionAdmin(session) {
     if (!session) { setAdmin(null); return }
     let role = null
     try {
-      const { data: profile } = await supabase
+      const { data: profile, error } = await supabase
         .from('profiles').select('role').eq('id', session.user.id).maybeSingle()
+      if (error) throw error
       role = profile?.role
-    } catch { /* keep the session even if the role lookup fails */ }
+    } catch {
+      role = null // can't confirm the role → treat as not an admin
+    }
+    if (role !== 'admin') {
+      setAdmin(null)
+      setAuthError('This account is not an admin. Sign in with an admin account.')
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+      return
+    }
+    setAuthError('')
     setAdmin(toAdmin(session, role))
   }
 
