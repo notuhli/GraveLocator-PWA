@@ -19,8 +19,12 @@ import { peso } from '../utils/format'
 import * as paymentsApi from '../api/paymentsApi'
 import { USE_REMOTE } from '../api/client'
 import { downloadStatementPdf, downloadStatementExcel } from '../utils/paymentStatement'
+import {
+  useValidation, hasErrors, FieldError, invalidStyle, todayISO,
+  amountError, dateError, textError, phoneError, onlyDecimal, onlyPhoneChars,
+} from '../utils/validation'
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = todayISO // local date (the old UTC version was a day behind before 8 AM PH time)
 const { CLOSED_RESERVATION, receiptToReview, cashToReceive } = paymentsApi
 const CLOSED = CLOSED_RESERVATION
 
@@ -182,6 +186,7 @@ export function PaymentReviewTab() {
   const [dialog, setDialog] = useState(null)     // { type, target }
   const [form, setForm] = useState({})
   const [busy, setBusy] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
 
   const byId = Object.fromEntries(paymentReservations.map((r) => [r.id, r]))
   const resRows = paymentReservations.filter((r) => view === 'all' || receiptToReview(r) || cashToReceive(r))
@@ -200,10 +205,47 @@ export function PaymentReviewTab() {
     .sort((a, b) => String(b.last).localeCompare(String(a.last)))
   const installmentReservations = paymentReservations.filter((r) => r.paymentOption === 'installment' && r.status === 'confirmed')
 
-  const open = (type, target, initial = {}) => { setForm(initial); setDialog({ type, target }) }
+  const open = (type, target, initial = {}) => { setForm(initial); reset(); setDialog({ type, target }) }
   const close = () => { if (!busy) { setDialog(null); setForm({}) } }
-  const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const setField = (k, filter) => (e) => {
+    const value = filter ? filter(e.target.value) : e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+  }
+
+  // Rules for whichever dialog is open.
+  const dialogErrors = () => {
+    switch (dialog?.type) {
+      case 'reject-receipt':
+      case 'reject-monthly':
+      case 'void-monthly':
+        return { note: textError(form.note, { label: 'Reason', required: true, min: 3, max: 300 }) }
+      case 'cash-received':
+        return {
+          amount: amountError(form.amount, { label: 'Amount received' }),
+          receivedOn: dateError(form.receivedOn, { label: 'Date received', required: true }),
+          note: textError(form.note, { label: 'Note', max: 100 }),
+        }
+      case 'record-monthly': {
+        const r = byId[form.reservationId]
+        const left = r ? paymentsApi.installmentProgress(r, installments).left : 0
+        return {
+          reservationId: r ? '' : 'Choose a reservation.',
+          amount: amountError(form.amount, { label: 'Amount', max: left > 0 ? left : undefined }),
+          method: ['cash', 'gcash'].includes(form.method) ? '' : 'Choose a payment method.',
+          paidOn: dateError(form.paidOn, { label: 'Date paid', required: true }),
+          note: textError(form.note, { label: 'Note', max: 100 }),
+        }
+      }
+      default:
+        return {}
+    }
+  }
+  const errors = dialogErrors()
+  const err = shown(errors)
+
   const run = async (fn, msg) => {
+    setTried(true)
+    if (hasErrors(errors)) return
     setBusy(true)
     const ok = await runAction(fn, msg)
     setBusy(false)
@@ -362,12 +404,13 @@ export function PaymentReviewTab() {
         <Dialog title="Reject GCash receipt?" subtitle={`${dialog.target.applicantName} · ${lot(dialog.target)}. The client will see "Receipt rejected".`} onClose={close}>
           <div className="modal-field">
             <label>Reason (shown to staff)</label>
-            <textarea value={form.note} onChange={setField('note')} placeholder="e.g. Amount doesn't match, blurry photo…" />
+            <textarea value={form.note} onChange={setField('note')} onBlur={touch('note')} maxLength={300} placeholder="e.g. Amount doesn't match, blurry photo…" style={invalidStyle(err('note'))} />
+            <FieldError msg={err('note')} />
           </div>
           <div className="modal-actions">
             <button className="btn btn-outline" onClick={close} disabled={busy}>Cancel</button>
             <button className="btn btn-danger" disabled={busy}
-              onClick={() => run(() => paymentsApi.setReservationPaymentStatus(dialog.target, 'rejected', form.note), 'Receipt rejected.')}>
+              onClick={() => run(() => paymentsApi.setReservationPaymentStatus(dialog.target, 'rejected', form.note.trim()), 'Receipt rejected.')}>
               {busy ? 'Saving…' : 'Reject receipt'}
             </button>
           </div>
@@ -376,13 +419,25 @@ export function PaymentReviewTab() {
 
       {dialog?.type === 'cash-received' && (
         <Dialog title="Mark cash payment as received" subtitle={`${dialog.target.applicantName} · ${lot(dialog.target)}`} onClose={close}>
-          <div className="modal-field"><label>Amount received (₱)</label><input type="number" min="0" step="0.01" value={form.amount} onChange={setField('amount')} /></div>
-          <div className="modal-field"><label>Date received</label><input type="date" value={form.receivedOn} onChange={setField('receivedOn')} /></div>
-          <div className="modal-field"><label>Note (optional)</label><input value={form.note} onChange={setField('note')} placeholder="e.g. OR #12345" /></div>
+          <div className="modal-field">
+            <label>Amount received (₱)</label>
+            <input inputMode="decimal" value={form.amount} onChange={setField('amount', onlyDecimal)} onBlur={touch('amount')} placeholder="e.g. 5000.00" style={invalidStyle(err('amount'))} />
+            <FieldError msg={err('amount')} />
+          </div>
+          <div className="modal-field">
+            <label>Date received</label>
+            <input type="date" max={today()} value={form.receivedOn} onChange={setField('receivedOn')} onBlur={touch('receivedOn')} style={invalidStyle(err('receivedOn'))} />
+            <FieldError msg={err('receivedOn')} />
+          </div>
+          <div className="modal-field">
+            <label>Note (optional)</label>
+            <input value={form.note} onChange={setField('note')} onBlur={touch('note')} maxLength={100} placeholder="e.g. OR #12345" style={invalidStyle(err('note'))} />
+            <FieldError msg={err('note')} />
+          </div>
           <div className="modal-actions">
             <button className="btn btn-outline" onClick={close} disabled={busy}>Cancel</button>
             <button className="btn btn-primary" disabled={busy}
-              onClick={() => run(() => paymentsApi.markDueNowReceived(dialog.target, { amount: Number(form.amount), receivedOn: form.receivedOn, note: form.note }), 'Payment recorded.')}>
+              onClick={() => run(() => paymentsApi.markDueNowReceived(dialog.target, { amount: Number(form.amount), receivedOn: form.receivedOn, note: form.note.trim() }), 'Payment recorded.')}>
               {busy ? 'Saving…' : 'Save'}
             </button>
           </div>
@@ -395,11 +450,15 @@ export function PaymentReviewTab() {
           subtitle={`${peso(dialog.target.amount)} · ${byId[dialog.target.reservationId]?.applicantName || ''}. It will no longer count toward the balance or Reports.`}
           onClose={close}
         >
-          <div className="modal-field"><label>Reason</label><textarea value={form.note} onChange={setField('note')} /></div>
+          <div className="modal-field">
+            <label>Reason</label>
+            <textarea value={form.note} onChange={setField('note')} onBlur={touch('note')} maxLength={300} style={invalidStyle(err('note'))} />
+            <FieldError msg={err('note')} />
+          </div>
           <div className="modal-actions">
             <button className="btn btn-outline" onClick={close} disabled={busy}>Cancel</button>
             <button className="btn btn-danger" disabled={busy}
-              onClick={() => run(() => paymentsApi.setInstallmentPaymentStatus(dialog.target.id, dialog.type === 'reject-monthly' ? 'rejected' : 'voided', form.note), dialog.type === 'reject-monthly' ? 'Payment rejected.' : 'Payment voided.')}>
+              onClick={() => run(() => paymentsApi.setInstallmentPaymentStatus(dialog.target.id, dialog.type === 'reject-monthly' ? 'rejected' : 'voided', form.note.trim()), dialog.type === 'reject-monthly' ? 'Payment rejected.' : 'Payment voided.')}>
               {busy ? 'Saving…' : dialog.type === 'reject-monthly' ? 'Reject' : 'Void'}
             </button>
           </div>
@@ -413,7 +472,7 @@ export function PaymentReviewTab() {
           <Dialog title="Record installment payment" subtitle="For payments made at the park office. It counts as verified right away." onClose={close}>
             <div className="modal-field">
               <label>Reservation</label>
-              <select value={form.reservationId} onChange={(e) => {
+              <select value={form.reservationId} onBlur={touch('reservationId')} style={invalidStyle(err('reservationId'))} onChange={(e) => {
                 const next = byId[e.target.value]
                 setForm((f) => ({ ...f, reservationId: e.target.value, amount: next?.monthlyAmount ? String(next.monthlyAmount) : f.amount }))
               }}>
@@ -424,18 +483,32 @@ export function PaymentReviewTab() {
               </select>
               {installmentReservations.length === 0 && <small className="pay-sub">No confirmed installment reservations yet.</small>}
               {prog && <small className="pay-sub">{prog.monthsCovered} of {prog.months} months paid · {peso(prog.left)} left · monthly {peso(prog.monthly)}</small>}
+              <FieldError msg={err('reservationId')} />
             </div>
-            <div className="modal-field"><label>Amount (₱)</label><input type="number" min="0" step="0.01" value={form.amount} onChange={setField('amount')} /></div>
+            <div className="modal-field">
+              <label>Amount (₱)</label>
+              <input inputMode="decimal" value={form.amount} onChange={setField('amount', onlyDecimal)} onBlur={touch('amount')} placeholder="e.g. 1500.00" style={invalidStyle(err('amount'))} />
+              <FieldError msg={err('amount')} />
+            </div>
             <div className="modal-field">
               <label>Method</label>
-              <select value={form.method} onChange={setField('method')}><option value="cash">Cash</option><option value="gcash">GCash</option></select>
+              <select value={form.method} onChange={setField('method')} style={invalidStyle(err('method'))}><option value="cash">Cash</option><option value="gcash">GCash</option></select>
+              <FieldError msg={err('method')} />
             </div>
-            <div className="modal-field"><label>Date paid</label><input type="date" value={form.paidOn} onChange={setField('paidOn')} /></div>
-            <div className="modal-field"><label>Note (optional)</label><input value={form.note} onChange={setField('note')} placeholder="e.g. OR #12345" /></div>
+            <div className="modal-field">
+              <label>Date paid</label>
+              <input type="date" max={today()} value={form.paidOn} onChange={setField('paidOn')} onBlur={touch('paidOn')} style={invalidStyle(err('paidOn'))} />
+              <FieldError msg={err('paidOn')} />
+            </div>
+            <div className="modal-field">
+              <label>Note (optional)</label>
+              <input value={form.note} onChange={setField('note')} onBlur={touch('note')} maxLength={100} placeholder="e.g. OR #12345" style={invalidStyle(err('note'))} />
+              <FieldError msg={err('note')} />
+            </div>
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={close} disabled={busy}>Cancel</button>
-              <button className="btn btn-primary" disabled={busy || !r}
-                onClick={() => run(() => paymentsApi.recordInstallmentPayment({ reservation: r, amount: Number(form.amount), method: form.method, paidOn: form.paidOn, note: form.note }), 'Payment recorded.')}>
+              <button className="btn btn-primary" disabled={busy}
+                onClick={() => run(() => paymentsApi.recordInstallmentPayment({ reservation: r, amount: Number(form.amount), method: form.method, paidOn: form.paidOn, note: form.note.trim() }), 'Payment recorded.')}>
                 {busy ? 'Saving…' : 'Record payment'}
               </button>
             </div>
@@ -453,6 +526,7 @@ export function GcashSettingsTab() {
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const { touch, setTried, shown } = useValidation()
 
   useEffect(() => {
     if (paymentSettings && !form) {
@@ -462,16 +536,23 @@ export function GcashSettingsTab() {
 
   if (loading || !form) return <div className="card"><p className="pay-sub">Loading GCash details…</p></div>
 
-  const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const setField = (k, filter) => (e) => {
+    const value = filter ? filter(e.target.value) : e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+  }
   const dirty = paymentSettings && ['gcashName', 'gcashNumber', 'gcashInstructions'].some((k) => (form[k] || '') !== (paymentSettings[k] || ''))
   const ready = !!(paymentSettings?.gcashNumber || paymentSettings?.gcashQrUrl)
 
+  const errors = {
+    gcashName: textError(form.gcashName, { label: 'Account name', required: !!String(form.gcashNumber || '').trim(), min: 2, max: 80 }),
+    gcashNumber: phoneError(form.gcashNumber, { label: 'GCash number' }),
+    gcashInstructions: textError(form.gcashInstructions, { label: 'Instructions', max: 300 }),
+  }
+  const err = shown(errors)
+
   const save = async () => {
-    const digits = (form.gcashNumber || '').replace(/\D/g, '')
-    if (form.gcashNumber && !/^(09|639)\d{9}$/.test(digits)) {
-      runAction(() => Promise.reject(new Error('Enter a valid PH mobile number, e.g. 0917 123 4567.')))
-      return
-    }
+    setTried(true)
+    if (hasErrors(errors)) return
     setSaving(true)
     await runAction(() => paymentsApi.savePaymentSettings(form), 'GCash details saved.')
     setSaving(false)
@@ -494,11 +575,20 @@ export function GcashSettingsTab() {
           Users see these when they choose GCash while reserving a lot or paying a monthly installment.
           GCash is only offered to users once a number or QR code is saved.
         </p>
-        <div className="modal-field"><label>Account Name</label><input value={form.gcashName || ''} onChange={setField('gcashName')} placeholder="e.g. Calbayog Memorial Park" /></div>
-        <div className="modal-field"><label>GCash Number</label><input value={form.gcashNumber || ''} onChange={setField('gcashNumber')} inputMode="tel" placeholder="09XX XXX XXXX" /></div>
+        <div className="modal-field">
+          <label>Account Name</label>
+          <input value={form.gcashName || ''} onChange={setField('gcashName')} onBlur={touch('gcashName')} maxLength={80} placeholder="e.g. Calbayog Memorial Park" style={invalidStyle(err('gcashName'))} />
+          <FieldError msg={err('gcashName')} />
+        </div>
+        <div className="modal-field">
+          <label>GCash Number</label>
+          <input value={form.gcashNumber || ''} onChange={setField('gcashNumber', onlyPhoneChars)} onBlur={touch('gcashNumber')} inputMode="tel" placeholder="09XX XXX XXXX" style={invalidStyle(err('gcashNumber'))} />
+          <FieldError msg={err('gcashNumber')} />
+        </div>
         <div className="modal-field">
           <label>Instructions (optional)</label>
-          <textarea value={form.gcashInstructions || ''} onChange={setField('gcashInstructions')} placeholder="e.g. Put your full name and lot number in the GCash message." />
+          <textarea value={form.gcashInstructions || ''} onChange={setField('gcashInstructions')} onBlur={touch('gcashInstructions')} maxLength={300} placeholder="e.g. Put your full name and lot number in the GCash message." style={invalidStyle(err('gcashInstructions'))} />
+          <FieldError msg={err('gcashInstructions')} />
         </div>
         <div className="modal-actions" style={{ justifyContent: 'flex-start' }}>
           <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save Details'}</button>

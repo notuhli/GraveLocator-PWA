@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useAdmin } from '../context/AdminContext'
 import { ENV } from '../config/constants'
+import { useValidation, hasErrors, FieldError, invalidStyle, emailError } from '../utils/validation'
+
+const inputStyle = { width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid var(--lgray)', fontFamily: 'var(--ff-b)', fontSize: 14, color: 'var(--charcoal)', outline: 'none' }
 
 export default function LoginScreen() {
   const { login, signIn, authError } = useAdmin()
@@ -8,14 +11,27 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [localError, setLocalError] = useState('')
+  const { touch, setTried, shown } = useValidation()
+
+  // Login only checks the format. The strong-password rule applies when a
+  // password is created or changed, so existing accounts can still sign in.
+  const errors = {
+    email: emailError(email, { required: ENV.USE_REMOTE }),
+    password: ENV.USE_REMOTE && !password ? 'Enter your password.' : '',
+  }
+  const err = shown(errors)
 
   async function handleSubmit() {
+    if (busy) return
     setLocalError('')
-    if (!ENV.USE_REMOTE) return login(email ? { email } : undefined)
+    setTried(true)
+    if (hasErrors(errors)) return
+    const cleanEmail = email.trim().toLowerCase()
+    if (!ENV.USE_REMOTE) return login(cleanEmail ? { email: cleanEmail } : undefined)
 
     setBusy(true)
     try {
-      await signIn({ email, password })
+      await signIn({ email: cleanEmail, password })
     } catch (err) {
       setLocalError(err.message || 'Sign in failed.')
     } finally {
@@ -83,12 +99,17 @@ export default function LoginScreen() {
               Email Address
             </label>
             <input
-              style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid var(--lgray)', fontFamily: 'var(--ff-b)', fontSize: 14, color: 'var(--charcoal)', outline: 'none' }}
+              style={invalidStyle(err('email'), inputStyle)}
               value={email}
               onChange={e => setEmail(e.target.value)}
+              onBlur={touch('email')}
+              onKeyDown={e => { if (e.key === 'Enter') handleSubmit() }}
               placeholder="admin email address"
               type="email"
+              maxLength={254}
+              autoComplete="username"
             />
+            <FieldError msg={err('email')} />
           </div>
 
           <div style={{ marginBottom: 18 }}>
@@ -96,12 +117,16 @@ export default function LoginScreen() {
               Password
             </label>
             <input
-              style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1.5px solid var(--lgray)', fontFamily: 'var(--ff-b)', fontSize: 14, color: 'var(--charcoal)', outline: 'none' }}
+              style={invalidStyle(err('password'), inputStyle)}
               value={password}
               onChange={e => setPassword(e.target.value)}
+              onBlur={touch('password')}
+              onKeyDown={e => { if (e.key === 'Enter') handleSubmit() }}
               placeholder="••••••••"
               type="password"
+              autoComplete="current-password"
             />
+            <FieldError msg={err('password')} />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>

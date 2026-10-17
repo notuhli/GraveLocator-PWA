@@ -7,6 +7,11 @@ import { peso } from '../utils/format'
 import { plotShort, plotLabel } from '../utils/plot'
 import * as api from '../api'
 import { downloadCSV } from '../utils/csv'
+import {
+  useValidation, hasErrors, FieldError, invalidStyle, textError, contactError, onlyPhoneChars,
+  passwordError, confirmPasswordError, PASSWORD_RULES,
+} from '../utils/validation'
+import { USE_REMOTE } from '../api/client'
 
 // "5 min ago" / "3 days ago" for the Last Active column.
 function timeAgo(iso) {
@@ -403,12 +408,12 @@ export function NotificationsPage() {
               </div>
               <div className="modal-field">
                 <label>Subject</label>
-                <input className="filter-input" style={{ width: '100%' }} placeholder="Notification subject…" value={subject} onChange={e => setSubject(e.target.value)} />
+                <input className="filter-input" style={{ width: '100%' }} placeholder="Notification subject…" maxLength={100} value={subject} onChange={e => setSubject(e.target.value)} />
               </div>
             </div>
             <div className="modal-field">
               <label>Message</label>
-              <textarea className="filter-input" style={{ width: '100%', minHeight: 100, resize: 'vertical' }} placeholder="Write your notification message here…" value={message} onChange={e => setMessage(e.target.value)} />
+              <textarea className="filter-input" style={{ width: '100%', minHeight: 100, resize: 'vertical' }} placeholder="Write your notification message here…" maxLength={1000} value={message} onChange={e => setMessage(e.target.value)} />
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <button className="btn btn-primary" onClick={() => send()} disabled={sending || !message.trim()}>{sending ? 'Sending…' : 'Send Now'}</button>
@@ -479,6 +484,82 @@ export function NotificationsPage() {
   )
 }
 
+// ── Change Password (signed-in admin) ────────────────────────────────────────
+function ChangePasswordCard() {
+  const { runAction } = useAdmin()
+  const empty = { current: '', next: '', confirm: '' }
+  const [pw, setPw] = useState(empty)
+  const [showPw, setShowPw] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
+
+  const set = (k) => (e) => {
+    const value = e.target.value
+    setPw((p) => ({ ...p, [k]: value }))
+  }
+  const errors = {
+    current: pw.current ? '' : 'Enter your current password.',
+    next: passwordError(pw.next) || (pw.next && pw.next === pw.current ? 'New password must be different from the current one.' : ''),
+    confirm: confirmPasswordError(pw.next, pw.confirm),
+  }
+  const err = shown(errors)
+
+  const submit = async () => {
+    setTried(true)
+    if (hasErrors(errors)) return
+    setSaving(true)
+    const ok = await runAction(() => api.changeOwnPassword(pw.current, pw.next), 'Password changed.')
+    setSaving(false)
+    if (ok) { setPw(empty); reset() }
+  }
+
+  const type = showPw ? 'text' : 'password'
+  return (
+    <div className="card settings-section" style={{ marginTop: 18 }}>
+      <h3>Change Password</h3>
+      {!USE_REMOTE && (
+        <p style={{ fontSize: 12, color: 'var(--dgray)', marginBottom: 12 }}>
+          Available once the dashboard is connected to Supabase.
+        </p>
+      )}
+      {[
+        ['Current Password', 'current', 'current-password'],
+        ['New Password', 'next', 'new-password'],
+        ['Confirm New Password', 'confirm', 'new-password'],
+      ].map(([label, k, auto]) => (
+        <div key={k} className="modal-field" style={{ marginBottom: 12 }}>
+          <label>{label}</label>
+          <input
+            type={type} autoComplete={auto} maxLength={72}
+            value={pw[k]} onChange={set(k)} onBlur={touch(k)}
+            disabled={!USE_REMOTE || saving} style={invalidStyle(err(k))}
+          />
+          <FieldError msg={err(k)} />
+        </div>
+      ))}
+
+      {/* Live checklist for the new password */}
+      <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px', fontSize: 12 }}>
+        {PASSWORD_RULES.map((r) => {
+          const ok = r.test(pw.next)
+          return (
+            <li key={r.label} style={{ color: ok ? '#16A34A' : 'var(--dgray)', marginBottom: 2 }}>
+              {ok ? '✓' : '•'} {r.label.charAt(0).toUpperCase() + r.label.slice(1)}
+            </li>
+          )
+        })}
+      </ul>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--dgray)', marginBottom: 12 }}>
+        <input type="checkbox" checked={showPw} onChange={(e) => setShowPw(e.target.checked)} /> Show passwords
+      </label>
+      <button className="btn btn-primary btn-sm" onClick={submit} disabled={!USE_REMOTE || saving}>
+        {saving ? 'Saving…' : 'Update Password'}
+      </button>
+    </div>
+  )
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 export function SettingsPage() {
   const { staff, loading } = useAdminStaff()
@@ -486,14 +567,28 @@ export function SettingsPage() {
   const { openModal, confirmAction, runAction } = useAdmin()
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
+  const { touch, setTried, shown } = useValidation()
 
   useEffect(() => { if (settings && !form) setForm(settings) }, [settings, form])
 
-  const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const setField = (k, filter) => (e) => {
+    const value = filter ? filter(e.target.value) : e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+  }
   const toggle = (k) => setForm((f) => ({ ...f, [k]: !f[k] }))
   const dirty = form && settings && JSON.stringify(form) !== JSON.stringify(settings)
 
+  const errors = form ? {
+    cemeteryName: textError(form.cemeteryName, { label: 'Cemetery name', required: true, min: 2, max: 100 }),
+    address: textError(form.address, { label: 'Address', max: 200 }),
+    contactNumber: contactError(form.contactNumber),
+    tagline: textError(form.tagline, { label: 'Tagline', max: 120 }),
+  } : {}
+  const err = shown(errors)
+
   const save = async () => {
+    setTried(true)
+    if (hasErrors(errors)) return
     setSaving(true)
     await runAction(() => api.saveSettings(form), 'Settings saved.')
     setSaving(false)
@@ -519,14 +614,18 @@ export function SettingsPage() {
           <div className="card settings-section">
             <h3>Cemetery Information</h3>
             {form && [
-              ['Cemetery Name', 'cemeteryName'],
-              ['Address', 'address'],
-              ['Contact Number', 'contactNumber'],
-              ['Tagline', 'tagline'],
-            ].map(([l, k]) => (
+              ['Cemetery Name', 'cemeteryName', 100],
+              ['Address', 'address', 200],
+              ['Contact Number', 'contactNumber', 20, onlyPhoneChars, 'tel'],
+              ['Tagline', 'tagline', 120],
+            ].map(([l, k, max, filter, mode]) => (
               <div key={k} className="modal-field" style={{ marginBottom: 12 }}>
                 <label>{l}</label>
-                <input value={form[k] || ''} onChange={setField(k)} />
+                <input
+                  value={form[k] || ''} onChange={setField(k, filter)} onBlur={touch(k)}
+                  maxLength={max} inputMode={mode} style={invalidStyle(err(k))}
+                />
+                <FieldError msg={err(k)} />
               </div>
             ))}
             <p style={{ fontSize: 11, color: 'var(--dgray)', marginTop: 4 }}>
@@ -534,6 +633,7 @@ export function SettingsPage() {
               dashboards can read these from one place.
             </p>
           </div>
+          <ChangePasswordCard />
         </div>
 
         <div>

@@ -13,6 +13,10 @@ import { PAYMENT_OPTIONS, reservationStatusLabel, reservationStatusBadge, RESERV
 import { peso, percent } from '../utils/format'
 import { compressReceipt, isReceiptImage, RECEIPT_MAX_MB } from '../utils/image'
 import * as api from '../api'
+import {
+  useValidation, hasErrors, FieldError, invalidStyle, todayISO,
+  nameError, emailError, phoneError, textError, amountError, onlyPhoneChars, onlyDecimal,
+} from '../utils/validation'
 
 const BackHeader = ({ title, sub, onBack }) => (
   <div className="hdr hdr-row" style={{ flexShrink: 0 }}>
@@ -80,8 +84,19 @@ export function ReserveFormScreen({ onNavigate, onBack }) {
   const [receiptFile, setReceiptFile] = useState(null)
   const [receiptPreview, setReceiptPreview] = useState('')
   const [error, setError] = useState('')
+  const { touch, setTried, shown } = useValidation()
 
-  const canContinue = applicantName.trim() && email.trim() && contactNumber.trim() && reservationDate
+  const today = todayISO()
+  const errors = {
+    applicantName: nameError(applicantName, { label: 'Full name' }),
+    email: emailError(email),
+    contactNumber: phoneError(contactNumber, { label: 'Contact number', required: true }),
+    reservationDate: !reservationDate ? 'Choose your preferred date.'
+      : !/^\d{4}-\d{2}-\d{2}$/.test(reservationDate) ? 'Enter a valid date.'
+      : reservationDate < today ? 'Choose today or a later date.' : '',
+    notes: textError(notes, { label: 'Notes', max: 500 }),
+  }
+  const err = shown(errors)
 
   // Installment: the amounts come straight from the price list for this lot + term.
   const plan = pricing?.installment?.[lot.classification] || null
@@ -129,14 +144,16 @@ export function ReserveFormScreen({ onNavigate, onBack }) {
   }
 
   function handleContinue() {
-    if (!canContinue) { setError('Please fill in your name, email, contact number, and preferred date.'); return }
+    setTried(true)
+    if (hasErrors(errors)) { setError('Please fix the highlighted fields.'); return }
+    setError('')
     if (paymentOption === 'installment' && !installment) { setError("Installment details aren't available for this lot. Please choose another payment option."); return }
     if (method === 'gcash' && !receiptFile) { setError('Please upload a photo of your GCash receipt.'); return }
     setReservationDraft({
-      applicantName, email, contactNumber,
+      applicantName: applicantName.trim(), email: email.trim().toLowerCase(), contactNumber: contactNumber.trim(),
       blockId: lot.blockId, blockName: lot.blockName, lawnName: lot.lawnName,
       lotNo: lot.lotNo, classification: lot.classification, price,
-      reservationDate, paymentOption, notes,
+      reservationDate, paymentOption, notes: notes.trim(),
       paymentMethod: method, installment,
       receiptFile: method === 'gcash' ? receiptFile : null,
       receiptPreview: method === 'gcash' ? receiptPreview : '',
@@ -164,12 +181,28 @@ export function ReserveFormScreen({ onNavigate, onBack }) {
         </div>
 
         <p className="section-label" style={{ marginBottom: 10 }}>Applicant Information</p>
-        <div className="field"><label className="lbl">Full Name</label><input className="inp" value={applicantName} onChange={(e) => setApplicantName(e.target.value)} placeholder="Full name" /></div>
-        <div className="field"><label className="lbl">Email</label><input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" /></div>
-        <div className="field"><label className="lbl">Contact Number</label><input className="inp" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="+63 9XX XXX XXXX" /></div>
+        <div className="field">
+          <label className="lbl">Full Name</label>
+          <input className="inp" maxLength={100} value={applicantName} onChange={(e) => setApplicantName(e.target.value)} onBlur={touch('applicantName')} placeholder="Full name" style={invalidStyle(err('applicantName'))} />
+          <FieldError msg={err('applicantName')} />
+        </div>
+        <div className="field">
+          <label className="lbl">Email</label>
+          <input className="inp" type="email" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} onBlur={touch('email')} placeholder="you@email.com" style={invalidStyle(err('email'))} />
+          <FieldError msg={err('email')} />
+        </div>
+        <div className="field">
+          <label className="lbl">Contact Number</label>
+          <input className="inp" inputMode="tel" value={contactNumber} onChange={(e) => setContactNumber(onlyPhoneChars(e.target.value))} onBlur={touch('contactNumber')} placeholder="0917 123 4567" style={invalidStyle(err('contactNumber'))} />
+          <FieldError msg={err('contactNumber')} />
+        </div>
 
         <p className="section-label" style={{ marginBottom: 10 }}>Reservation Details</p>
-        <div className="field"><label className="lbl">Preferred Reservation Date</label><input className="inp" type="date" value={reservationDate} onChange={(e) => setReservationDate(e.target.value)} /></div>
+        <div className="field">
+          <label className="lbl">Preferred Reservation Date</label>
+          <input className="inp" type="date" min={today} value={reservationDate} onChange={(e) => setReservationDate(e.target.value)} onBlur={touch('reservationDate')} style={invalidStyle(err('reservationDate'))} />
+          <FieldError msg={err('reservationDate')} />
+        </div>
         <div className="field">
           <label className="lbl">Payment Option</label>
           <div className="pay-opts">
@@ -238,7 +271,8 @@ export function ReserveFormScreen({ onNavigate, onBack }) {
         )}
         <div className="field mb-20">
           <label className="lbl">Additional Notes (optional)</label>
-          <textarea className="inp" rows="3" placeholder="Anything the office should know…" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <textarea className="inp" rows="3" maxLength={500} placeholder="Anything the office should know…" value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={touch('notes')} style={invalidStyle(err('notes'))} />
+          <FieldError msg={err('notes')} />
         </div>
 
         {error && <p style={{ color: '#DC2626', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
@@ -466,6 +500,8 @@ function InstallmentPaymentsCard({ r }) {
   }
 
   async function submit() {
+    const amtErr = amountError(amount, { label: 'Amount' })
+    if (amtErr) { setError(amtErr); return }
     const value = Math.round(Number(amount) * 100) / 100
     if (!(value > 0)) { setError('Enter the amount you paid.'); return }
     if (value > s.totalLeft + 0.005) { setError(`That is more than the ${peso(s.totalLeft)} left to pay.`); return }
@@ -549,7 +585,7 @@ function InstallmentPaymentsCard({ r }) {
               )}
               <div className="field" style={{ marginTop: 12 }}>
                 <label className="lbl">Amount you paid</label>
-                <input className="inp" type="number" inputMode="decimal" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                <input className="inp" inputMode="decimal" placeholder="e.g. 1500.00" value={amount} onChange={(e) => setAmount(onlyDecimal(e.target.value))} />
                 <p className="f11 c-stone" style={{ margin: '6px 0 0' }}>Your monthly payment is {peso(s.monthly)}.</p>
               </div>
               <div className="field">

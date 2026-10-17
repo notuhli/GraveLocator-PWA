@@ -5,6 +5,11 @@ import { useApp } from '../context/AppContext'
 import { usePrefs } from '../context/PrefsContext'
 import { LANGUAGES } from '../i18n'
 import * as api from '../api'
+import {
+  useValidation, hasErrors, FieldError, invalidStyle, todayISO,
+  nameError, phoneError, integerError, dateError, dateOrderError, textError,
+  passwordError, confirmPasswordError, PASSWORD_RULES, onlyDigits, onlyPhoneChars,
+} from '../utils/validation'
 
 // ── MemorialsScreen (PRIVATE) ────────────────────────────────────────────────
 // Shows ONLY the signed-in user's own memorials. Privacy is enforced in the
@@ -24,22 +29,36 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
   const [tribute, setTribute] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [notice, setNotice] = useState('')
+  const { touch, reset, setTried, shown } = useValidation()
 
   function resetForm() {
     setFullName(''); setBirthDate(''); setDeathDate('')
     setBlockId(''); setLotNo(''); setTribute(''); setNotice('')
+    reset()
   }
+
+  const block = blocks.find((b) => b.id === blockId)
+  const errors = {
+    fullName: nameError(fullName, { label: 'Name of deceased' }),
+    birthDate: dateError(birthDate, { label: 'Birth date' }),
+    deathDate: dateError(deathDate, { label: 'Death date' }) || dateOrderError(birthDate, deathDate),
+    blockId: lotNo && !blockId ? 'Choose the block for this lot.' : '',
+    lotNo: integerError(lotNo, { label: 'Lot number', required: false, max: block?.maxLot || 99999 }),
+    tribute: textError(tribute, { label: 'Tribute', max: 500 }),
+  }
+  const err = shown(errors)
 
   useEffect(() => {
     if (!creating) resetForm()
   }, [creating])
 
   async function handlePublish() {
-    if (!fullName) return
+    setTried(true)
+    if (hasErrors(errors)) return
     setSubmitting(true)
     try {
       await api.createMemorial(
-        { name: fullName, birthDate, deathDate, blockId, lotNo, quote: tribute, userId: ownerKey },
+        { name: fullName.trim(), birthDate, deathDate, blockId, lotNo, quote: tribute.trim(), userId: ownerKey },
         ownerKey,
       )
       resetForm()
@@ -65,20 +84,41 @@ export function MemorialsScreen({ onNavigate, onBack, modal }) {
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
           <span>{t('mem.upload')}</span>
         </div>
-        <div className="field"><label className="lbl">{t('mem.fullName')}</label><input className="inp" placeholder={t('mem.fullNamePh')} value={fullName} onChange={(e)=>setFullName(e.target.value)}/></div>
-        <div className="field"><label className="lbl">{t('mem.birth')}</label><input className="inp" type="date" value={birthDate} onChange={(e)=>setBirthDate(e.target.value)}/></div>
-        <div className="field"><label className="lbl">{t('mem.death')}</label><input className="inp" type="date" value={deathDate} onChange={(e)=>setDeathDate(e.target.value)}/></div>
+        <div className="field">
+          <label className="lbl">{t('mem.fullName')}</label>
+          <input className="inp" placeholder={t('mem.fullNamePh')} maxLength={100} value={fullName} onChange={(e)=>setFullName(e.target.value)} onBlur={touch('fullName')} style={invalidStyle(err('fullName'))}/>
+          <FieldError msg={err('fullName')} />
+        </div>
+        <div className="field">
+          <label className="lbl">{t('mem.birth')}</label>
+          <input className="inp" type="date" min="1900-01-01" max={todayISO()} value={birthDate} onChange={(e)=>setBirthDate(e.target.value)} onBlur={touch('birthDate')} style={invalidStyle(err('birthDate'))}/>
+          <FieldError msg={err('birthDate')} />
+        </div>
+        <div className="field">
+          <label className="lbl">{t('mem.death')}</label>
+          <input className="inp" type="date" min={birthDate || '1900-01-01'} max={todayISO()} value={deathDate} onChange={(e)=>setDeathDate(e.target.value)} onBlur={touch('deathDate')} style={invalidStyle(err('deathDate'))}/>
+          <FieldError msg={err('deathDate')} />
+        </div>
         <div className="field">
           <label className="lbl">{t('mem.block')}</label>
-          <select className="inp" value={blockId} onChange={(e)=>setBlockId(e.target.value)}>
+          <select className="inp" value={blockId} onChange={(e)=>setBlockId(e.target.value)} onBlur={touch('blockId')} style={invalidStyle(err('blockId'))}>
             <option value="">{t('mem.selectBlock')}</option>
             {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
+          <FieldError msg={err('blockId')} />
         </div>
-        <div className="field"><label className="lbl">{t('mem.lot')}</label><input className="inp" type="number" min="1" placeholder={t('mem.lotPh')} value={lotNo} onChange={(e)=>setLotNo(e.target.value)}/></div>
-        <div className="field mb-20"><label className="lbl">{t('mem.tribute')}</label><textarea className="inp" rows="4" placeholder={t('mem.tributePh')} value={tribute} onChange={(e)=>setTribute(e.target.value)}/></div>
+        <div className="field">
+          <label className="lbl">{t('mem.lot')}</label>
+          <input className="inp" inputMode="numeric" maxLength={5} placeholder={t('mem.lotPh')} value={lotNo} onChange={(e)=>setLotNo(onlyDigits(e.target.value))} onBlur={touch('lotNo')} style={invalidStyle(err('lotNo'))}/>
+          <FieldError msg={err('lotNo')} />
+        </div>
+        <div className="field mb-20">
+          <label className="lbl">{t('mem.tribute')}</label>
+          <textarea className="inp" rows="4" maxLength={500} placeholder={t('mem.tributePh')} value={tribute} onChange={(e)=>setTribute(e.target.value)} onBlur={touch('tribute')} style={invalidStyle(err('tribute'))}/>
+          <FieldError msg={err('tribute')} />
+        </div>
         {notice && <p style={{ color:'#DC2626', fontSize:13, margin:'0 0 12px' }}>{notice}</p>}
-        <button className="btn btn-primary btn-full" onClick={handlePublish} disabled={submitting || !fullName}>
+        <button className="btn btn-primary btn-full" onClick={handlePublish} disabled={submitting}>
           {submitting ? t('mem.submitting') : t('mem.publish')}
         </button>
         <p style={{ fontSize:12, color:'var(--stone)', textAlign:'center', marginTop:10 }}>
@@ -226,11 +266,20 @@ function EditProfileModal({ user, onClose }) {
   const [phone, setPhone] = useState(user?.phone || '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const { touch, setTried, shown } = useValidation()
+
+  const errors = {
+    fullName: nameError(fullName, { label: 'Full name' }),
+    phone: phoneError(phone),
+  }
+  const err = shown(errors)
 
   async function handleSave() {
+    setTried(true)
+    if (hasErrors(errors)) return
     setBusy(true); setError('')
     try {
-      await updateProfile({ fullName, phone })
+      await updateProfile({ fullName: fullName.trim(), phone: phone.trim() })
       onClose()
     } catch (err) {
       setError(err.message || t('edit.err'))
@@ -242,8 +291,14 @@ function EditProfileModal({ user, onClose }) {
   return (
     <SettingsModal title={t('profile.edit')} onClose={onClose}>
       <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-        <input className="inp" placeholder={t('edit.fullName')} value={fullName} onChange={(e)=>setFullName(e.target.value)} />
-        <input className="inp" placeholder={t('edit.phone')} value={phone} onChange={(e)=>setPhone(e.target.value)} />
+        <div>
+          <input className="inp" placeholder={t('edit.fullName')} maxLength={100} value={fullName} onChange={(e)=>setFullName(e.target.value)} onBlur={touch('fullName')} style={invalidStyle(err('fullName'))} />
+          <FieldError msg={err('fullName')} />
+        </div>
+        <div>
+          <input className="inp" placeholder={t('edit.phone')} inputMode="tel" value={phone} onChange={(e)=>setPhone(onlyPhoneChars(e.target.value))} onBlur={touch('phone')} style={invalidStyle(err('phone'))} />
+          <FieldError msg={err('phone')} />
+        </div>
         <input className="inp" value={user?.email || ''} disabled style={{ opacity:.6 }} />
         <p style={{ fontSize:12, color:'#8B9EA0', margin:0 }}>{t('edit.emailNote')}</p>
         {error && <p style={{ color:'#DC2626', fontSize:13, margin:0 }}>{error}</p>}
@@ -263,11 +318,18 @@ function ManagePasswordModal({ onClose }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const { touch, setTried, shown } = useValidation()
+
+  const errors = {
+    newPassword: passwordError(newPassword),
+    confirmPassword: confirmPasswordError(newPassword, confirmPassword),
+  }
+  const err = shown(errors)
 
   async function handleSave() {
     setError('')
-    if (newPassword.length < 6) return setError(t('pw.short'))
-    if (newPassword !== confirmPassword) return setError(t('pw.mismatch'))
+    setTried(true)
+    if (hasErrors(errors)) return
 
     setBusy(true)
     try {
@@ -286,8 +348,24 @@ function ManagePasswordModal({ onClose }) {
         <p style={{ color:'#166534', fontSize:14 }}>{t('pw.success')}</p>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          <input className="inp" placeholder={t('pw.new')} type="password" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} />
-          <input className="inp" placeholder={t('pw.confirm')} type="password" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)} />
+          <div>
+            <input className="inp" placeholder={t('pw.new')} type="password" maxLength={72} autoComplete="new-password" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} onBlur={touch('newPassword')} style={invalidStyle(err('newPassword'))} />
+            <FieldError msg={err('newPassword')} />
+          </div>
+          <ul style={{ listStyle:'none', padding:0, margin:0, fontSize:12 }}>
+            {PASSWORD_RULES.map((r) => {
+              const ok = r.test(newPassword)
+              return (
+                <li key={r.label} style={{ color: ok ? '#16A34A' : '#8B9EA0', marginBottom:2 }}>
+                  {ok ? '✓' : '•'} {r.label.charAt(0).toUpperCase() + r.label.slice(1)}
+                </li>
+              )
+            })}
+          </ul>
+          <div>
+            <input className="inp" placeholder={t('pw.confirm')} type="password" maxLength={72} autoComplete="new-password" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)} onBlur={touch('confirmPassword')} style={invalidStyle(err('confirmPassword'))} />
+            <FieldError msg={err('confirmPassword')} />
+          </div>
           {error && <p style={{ color:'#DC2626', fontSize:13, margin:0 }}>{error}</p>}
           <button className="btn btn-primary btn-full" onClick={handleSave} disabled={busy}>
             {busy ? t('pw.updating') : t('pw.update')}

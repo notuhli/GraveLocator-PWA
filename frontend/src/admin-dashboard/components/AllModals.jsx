@@ -7,6 +7,11 @@ import { plotLabel, plotShort } from '../utils/plot'
 import { peso } from '../utils/format'
 import { paymentStatusMeta, PAYMENT_OPTION_LABEL, PAYMENT_METHOD_LABEL, INSTALLMENT_TERM_LABEL } from '../config/paymentStatus'
 import * as api from '../api'
+import {
+  useValidation, hasErrors, FieldError, invalidStyle, todayISO,
+  nameError, emailError, phoneError, integerError, dateError, dateOrderError, textError, deceasedNamesError,
+  onlyDigits, onlyPhoneChars,
+} from '../utils/validation'
 
 // Shared shell: reads context.modal, renders nothing when it's not this modal's id.
 function Modal({ id, title, subtitle, children }) {
@@ -36,6 +41,7 @@ function UpdateLotModal() {
   const [intermentCount, setIntermentCount] = useState(1)
   const [names, setNames] = useState('')           // names of the deceased, one per line
   const [saving, setSaving] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
 
   const needsIntermentCount = status === STATUS.WITH_INTERMENT
 
@@ -49,7 +55,8 @@ function UpdateLotModal() {
     // otherwise start at 1 (about to record the first burial).
     setIntermentCount(record?.intermentCount > 0 ? record.intermentCount : 1)
     setNames('')
-  }, [isOpen, record])
+    reset()
+  }, [isOpen, record, reset])
 
   // Load the lot's saved names (and interment count) once a lot is picked.
   useEffect(() => {
@@ -67,17 +74,26 @@ function UpdateLotModal() {
 
   if (!isOpen) return null
   const gridBlocks = blocks.filter((b) => b.hasGrid)
+  const block = blocks.find((b) => b.id === blockId)
+
+  const errors = {
+    blockId: blockId ? '' : 'Choose a block.',
+    lotNo: integerError(lotNo, { label: 'Lot number', max: block?.maxLot || 99999 }),
+    intermentCount: needsIntermentCount ? integerError(intermentCount, { label: 'Number of interments', max: 50 }) : '',
+    names: needsIntermentCount ? deceasedNamesError(names, intermentCount) : '',
+  }
+  const err = shown(errors)
 
   const submit = async () => {
-    if (!blockId || !lotNo) return
-    if (needsIntermentCount && (!intermentCount || Number(intermentCount) < 1)) return
+    setTried(true)
+    if (hasErrors(errors)) return
     setSaving(true)
     const ok = await runAction(
       () => api.updateLotStatus(
         blockId, Number(lotNo), status,
-        needsIntermentCount ? intermentCount : undefined,
+        needsIntermentCount ? Number(intermentCount) : undefined,
         // With Interment → save the names; Available → clear them; others → keep.
-        needsIntermentCount ? names.split('\n') : status === STATUS.AVAILABLE ? [] : undefined,
+        needsIntermentCount ? names.split('\n').map((n) => n.trim()).filter(Boolean) : status === STATUS.AVAILABLE ? [] : undefined,
       ),
       `Lot ${lotNo} updated.`,
     )
@@ -93,14 +109,20 @@ function UpdateLotModal() {
         <div className="modal-row">
           <div className="modal-field">
             <label>Block</label>
-            <select value={blockId} onChange={e => setBlockId(e.target.value)} disabled={!!record}>
+            <select value={blockId} onChange={e => setBlockId(e.target.value)} onBlur={touch('blockId')} disabled={!!record} style={invalidStyle(err('blockId'))}>
               <option value="">Select a block…</option>
               {gridBlocks.map(b => <option key={b.id} value={b.id}>{b.name}{b.lawnName ? ` — ${b.lawnName}` : ''}</option>)}
             </select>
+            <FieldError msg={err('blockId')} />
           </div>
           <div className="modal-field">
             <label>Lot Number</label>
-            <input type="number" min="1" placeholder="e.g. 204" value={lotNo} onChange={e => setLotNo(e.target.value)} disabled={!!record} />
+            <input
+              inputMode="numeric" maxLength={5} placeholder="e.g. 204"
+              value={lotNo} onChange={e => setLotNo(onlyDigits(e.target.value))} onBlur={touch('lotNo')}
+              disabled={!!record} style={invalidStyle(err('lotNo'))}
+            />
+            <FieldError msg={err('lotNo')} />
           </div>
         </div>
         <div className="modal-field">
@@ -113,12 +135,11 @@ function UpdateLotModal() {
           <div className="modal-field">
             <label>Number of Interments</label>
             <input
-              type="number"
-              min="1"
-              placeholder="e.g. 1"
-              value={intermentCount}
-              onChange={e => setIntermentCount(e.target.value)}
+              inputMode="numeric" maxLength={2} placeholder="e.g. 1"
+              value={intermentCount} onChange={e => setIntermentCount(onlyDigits(e.target.value))} onBlur={touch('intermentCount')}
+              style={invalidStyle(err('intermentCount'))}
             />
+            <FieldError msg={err('intermentCount')} />
             <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
               How many people are buried in this lot.
             </p>
@@ -132,7 +153,10 @@ function UpdateLotModal() {
               placeholder={'One name per line, e.g.\nDela Cruz, Juan'}
               value={names}
               onChange={e => setNames(e.target.value)}
+              onBlur={touch('names')}
+              style={invalidStyle(err('names'))}
             />
+            <FieldError msg={err('names')} />
             <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
               Shown on the lot's details and searchable in the user app.
             </p>
@@ -140,11 +164,7 @@ function UpdateLotModal() {
         )}
         <div className="modal-actions">
           <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            onClick={submit}
-            disabled={saving || !blockId || !lotNo || (needsIntermentCount && (!intermentCount || Number(intermentCount) < 1))}
-          >
+          <button className="btn btn-primary" onClick={submit} disabled={saving}>
             {saving ? 'Saving…' : 'Save Status'}
           </button>
         </div>
@@ -160,21 +180,35 @@ function UserFormModal({ id, title, subtitle }) {
   const record = modal?.record || null
   const [form, setForm] = useState({ name: '', email: '', phone: '', status: USER_STATUS.ACTIVE })
   const [saving, setSaving] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
 
   useEffect(() => {
     if (!isOpen) return
     setForm(record
-      ? { name: record.name, email: record.email, phone: record.phone, status: record.status }
+      ? { name: record.name || '', email: record.email || '', phone: record.phone || '', status: record.status || USER_STATUS.ACTIVE }
       : { name: '', email: '', phone: '', status: USER_STATUS.ACTIVE })
-  }, [isOpen, record])
+    reset()
+  }, [isOpen, record, reset])
   if (!isOpen) return null
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const set = (k, filter) => (e) => {
+    const value = filter ? filter(e.target.value) : e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+  }
+  const errors = {
+    name: nameError(form.name, { label: 'Full name' }),
+    email: emailError(form.email),
+    phone: phoneError(form.phone),
+  }
+  const err = shown(errors)
+
   const submit = async () => {
-    if (!form.name || !form.email) return
+    setTried(true)
+    if (hasErrors(errors)) return
+    const clean = { ...form, name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone.trim() }
     setSaving(true)
     const ok = await runAction(
-      () => (record ? api.updateUser(record.id, form) : api.createUser(form)),
+      () => (record ? api.updateUser(record.id, clean) : api.createUser(clean)),
       record ? 'User updated.' : 'User added.',
     )
     setSaving(false)
@@ -184,11 +218,23 @@ function UserFormModal({ id, title, subtitle }) {
   return (
     <Modal id={id} title={title} subtitle={record ? record.name : subtitle}>
       <div className="modal-row">
-        <div className="modal-field"><label>Full Name</label><input value={form.name} onChange={set('name')} placeholder="Full name" /></div>
-        <div className="modal-field"><label>Email</label><input type="email" value={form.email} onChange={set('email')} placeholder="user@email.com" /></div>
+        <div className="modal-field">
+          <label>Full Name</label>
+          <input value={form.name} onChange={set('name')} onBlur={touch('name')} placeholder="Full name" maxLength={100} style={invalidStyle(err('name'))} />
+          <FieldError msg={err('name')} />
+        </div>
+        <div className="modal-field">
+          <label>Email</label>
+          <input type="email" value={form.email} onChange={set('email')} onBlur={touch('email')} placeholder="user@email.com" maxLength={254} style={invalidStyle(err('email'))} />
+          <FieldError msg={err('email')} />
+        </div>
       </div>
       <div className="modal-row">
-        <div className="modal-field"><label>Phone</label><input value={form.phone} onChange={set('phone')} placeholder="+63 9XX XXX XXXX" /></div>
+        <div className="modal-field">
+          <label>Phone</label>
+          <input inputMode="tel" value={form.phone} onChange={set('phone', onlyPhoneChars)} onBlur={touch('phone')} placeholder="0917 123 4567" style={invalidStyle(err('phone'))} />
+          <FieldError msg={err('phone')} />
+        </div>
         <div className="modal-field">
           <label>Status</label>
           <select value={form.status} onChange={set('status')}>
@@ -198,12 +244,26 @@ function UserFormModal({ id, title, subtitle }) {
       </div>
       <div className="modal-actions">
         <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
-        <button className="btn btn-primary" onClick={submit} disabled={saving || !form.name || !form.email}>
+        <button className="btn btn-primary" onClick={submit} disabled={saving}>
           {saving ? 'Saving…' : record ? 'Save Changes' : 'Add User'}
         </button>
       </div>
     </Modal>
   )
+}
+
+// Shared memorial rules (Add + Edit).
+function memorialErrors(form, blocks, { withSubmitter = false, tributeKey = 'tribute' } = {}) {
+  const block = blocks.find((b) => b.id === form.blockId)
+  return {
+    name: nameError(form.name, { label: 'Name of deceased' }),
+    ...(withSubmitter ? { submittedBy: nameError(form.submittedBy, { label: 'Submitted by', required: false }) } : {}),
+    birth: dateError(form.birth, { label: 'Birth date' }),
+    death: dateError(form.death, { label: 'Death date' }) || dateOrderError(form.birth, form.death),
+    blockId: form.lotNo && !form.blockId ? 'Choose the block for this lot.' : '',
+    lotNo: integerError(form.lotNo, { label: 'Lot number', required: false, max: block?.maxLot || 99999 }),
+    [tributeKey]: textError(form[tributeKey], { label: 'Tribute message', max: 500 }),
+  }
 }
 
 // ── Add Memorial ───────────────────────────────────────────────────────────────
@@ -213,22 +273,34 @@ function AddMemorialModal() {
   const [form, setForm] = useState({ name: '', submittedBy: '', birth: '', death: '', blockId: '', lotNo: '', tribute: '' })
   const [blocks, setBlocks] = useState([])
   const [saving, setSaving] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
 
   useEffect(() => { api.getBlocks().then(setBlocks) }, [])
-  useEffect(() => { if (isOpen) setForm({ name: '', submittedBy: '', birth: '', death: '', blockId: '', lotNo: '', tribute: '' }) }, [isOpen])
+  useEffect(() => {
+    if (!isOpen) return
+    setForm({ name: '', submittedBy: '', birth: '', death: '', blockId: '', lotNo: '', tribute: '' })
+    reset()
+  }, [isOpen, reset])
   if (!isOpen) return null
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const set = (k, filter) => (e) => {
+    const value = filter ? filter(e.target.value) : e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+  }
+  const errors = memorialErrors(form, blocks, { withSubmitter: true })
+  const err = shown(errors)
+
   const submit = async () => {
-    if (!form.name) return
+    setTried(true)
+    if (hasErrors(errors)) return
     setSaving(true)
     const ok = await runAction(() => api.createMemorial({
-        name: form.name, emoji: '🕊️',
+        name: form.name.trim(), emoji: '🕊️',
         dates: `${form.birth || '?'} – ${form.death || '?'} · ${plotShort({ blockId: form.blockId, lotNo: form.lotNo })}`,
-        quote: form.tribute, likes: 0, comments: 0,
+        quote: form.tribute.trim(), likes: 0, comments: 0,
         birth_date: form.birth || null, death_date: form.death || null,
         block_id: form.blockId || null, lot_no: form.lotNo ? Number(form.lotNo) : null,
-        submitted_by: form.submittedBy || null,
+        submitted_by: form.submittedBy.trim() || null,
       }), 'Memorial published.')
     setSaving(false)
     if (ok) closeModal()
@@ -237,27 +309,52 @@ function AddMemorialModal() {
   return (
     <Modal id="modal-addmemorial" title="Add Memorial" subtitle="Create a digital memorial entry.">
       <div className="modal-row">
-        <div className="modal-field"><label>Name of Deceased</label><input value={form.name} onChange={set('name')} placeholder="Full name" /></div>
-        <div className="modal-field"><label>Submitted By (User)</label><input value={form.submittedBy} onChange={set('submittedBy')} placeholder="Plot owner name" /></div>
+        <div className="modal-field">
+          <label>Name of Deceased</label>
+          <input value={form.name} onChange={set('name')} onBlur={touch('name')} placeholder="Full name" maxLength={100} style={invalidStyle(err('name'))} />
+          <FieldError msg={err('name')} />
+        </div>
+        <div className="modal-field">
+          <label>Submitted By (User)</label>
+          <input value={form.submittedBy} onChange={set('submittedBy')} onBlur={touch('submittedBy')} placeholder="Plot owner name" maxLength={100} style={invalidStyle(err('submittedBy'))} />
+          <FieldError msg={err('submittedBy')} />
+        </div>
       </div>
       <div className="modal-row">
-        <div className="modal-field"><label>Birth Date</label><input type="date" value={form.birth} onChange={set('birth')} /></div>
-        <div className="modal-field"><label>Death Date</label><input type="date" value={form.death} onChange={set('death')} /></div>
+        <div className="modal-field">
+          <label>Birth Date</label>
+          <input type="date" min="1900-01-01" max={todayISO()} value={form.birth} onChange={set('birth')} onBlur={touch('birth')} style={invalidStyle(err('birth'))} />
+          <FieldError msg={err('birth')} />
+        </div>
+        <div className="modal-field">
+          <label>Death Date</label>
+          <input type="date" min={form.birth || '1900-01-01'} max={todayISO()} value={form.death} onChange={set('death')} onBlur={touch('death')} style={invalidStyle(err('death'))} />
+          <FieldError msg={err('death')} />
+        </div>
       </div>
       <div className="modal-row">
         <div className="modal-field">
           <label>Block</label>
-          <select value={form.blockId} onChange={set('blockId')}>
+          <select value={form.blockId} onChange={set('blockId')} onBlur={touch('blockId')} style={invalidStyle(err('blockId'))}>
             <option value="">Select a block…</option>
             {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
+          <FieldError msg={err('blockId')} />
         </div>
-        <div className="modal-field"><label>Lot Number</label><input type="number" min="1" value={form.lotNo} onChange={set('lotNo')} placeholder="e.g. 204" /></div>
+        <div className="modal-field">
+          <label>Lot Number</label>
+          <input inputMode="numeric" maxLength={5} value={form.lotNo} onChange={set('lotNo', onlyDigits)} onBlur={touch('lotNo')} placeholder="e.g. 204" style={invalidStyle(err('lotNo'))} />
+          <FieldError msg={err('lotNo')} />
+        </div>
       </div>
-      <div className="modal-field"><label>Tribute Message</label><textarea value={form.tribute} onChange={set('tribute')} placeholder="Enter tribute…" /></div>
+      <div className="modal-field">
+        <label>Tribute Message</label>
+        <textarea value={form.tribute} onChange={set('tribute')} onBlur={touch('tribute')} placeholder="Enter tribute…" maxLength={500} style={invalidStyle(err('tribute'))} />
+        <FieldError msg={err('tribute')} />
+      </div>
       <div className="modal-actions">
         <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
-        <button className="btn btn-primary" onClick={submit} disabled={saving || !form.name}>{saving ? 'Publishing…' : 'Publish Memorial'}</button>
+        <button className="btn btn-primary" onClick={submit} disabled={saving}>{saving ? 'Publishing…' : 'Publish Memorial'}</button>
       </div>
     </Modal>
   )
@@ -269,15 +366,31 @@ function AddAdminModal() {
   const isOpen = modal?.id === 'modal-addadmin'
   const [form, setForm] = useState({ name: '', email: '', role: ADMIN_ROLE.VIEWER })
   const [saving, setSaving] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
 
-  useEffect(() => { if (isOpen) setForm({ name: '', email: '', role: ADMIN_ROLE.VIEWER }) }, [isOpen])
+  useEffect(() => {
+    if (!isOpen) return
+    setForm({ name: '', email: '', role: ADMIN_ROLE.VIEWER })
+    reset()
+  }, [isOpen, reset])
   if (!isOpen) return null
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const errors = {
+    name: nameError(form.name, { label: 'Full name' }),
+    email: emailError(form.email),
+    role: Object.values(ADMIN_ROLE).includes(form.role) ? '' : 'Choose a role.',
+  }
+  const err = shown(errors)
+
   const submit = async () => {
-    if (!form.name || !form.email) return
+    setTried(true)
+    if (hasErrors(errors)) return
     setSaving(true)
-    const ok = await runAction(() => api.addAdminStaff(form), 'Staff member added.')
+    const ok = await runAction(
+      () => api.addAdminStaff({ ...form, name: form.name.trim(), email: form.email.trim().toLowerCase() }),
+      'Staff member added.',
+    )
     setSaving(false)
     if (ok) closeModal()
   }
@@ -285,18 +398,27 @@ function AddAdminModal() {
   return (
     <Modal id="modal-addadmin" title="Add Admin Staff" subtitle="Grant dashboard access to a staff member.">
       <div className="modal-row">
-        <div className="modal-field"><label>Full Name</label><input value={form.name} onChange={set('name')} placeholder="Full name" /></div>
-        <div className="modal-field"><label>Email</label><input type="email" value={form.email} onChange={set('email')} placeholder="staff@calbayog.gov.ph" /></div>
+        <div className="modal-field">
+          <label>Full Name</label>
+          <input value={form.name} onChange={set('name')} onBlur={touch('name')} placeholder="Full name" maxLength={100} style={invalidStyle(err('name'))} />
+          <FieldError msg={err('name')} />
+        </div>
+        <div className="modal-field">
+          <label>Email</label>
+          <input type="email" value={form.email} onChange={set('email')} onBlur={touch('email')} placeholder="staff@calbayog.gov.ph" maxLength={254} style={invalidStyle(err('email'))} />
+          <FieldError msg={err('email')} />
+        </div>
       </div>
       <div className="modal-field">
         <label>Role</label>
-        <select value={form.role} onChange={set('role')}>
+        <select value={form.role} onChange={set('role')} style={invalidStyle(err('role'))}>
           {Object.values(ADMIN_ROLE).map(r => <option key={r} value={r}>{r}</option>)}
         </select>
+        <FieldError msg={err('role')} />
       </div>
       <div className="modal-actions">
         <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
-        <button className="btn btn-primary" onClick={submit} disabled={saving || !form.name || !form.email}>{saving ? 'Adding…' : 'Add Staff'}</button>
+        <button className="btn btn-primary" onClick={submit} disabled={saving}>{saving ? 'Adding…' : 'Add Staff'}</button>
       </div>
     </Modal>
   )
@@ -429,6 +551,7 @@ function EditMemorialModal() {
   const [form, setForm] = useState({})
   const [blocks, setBlocks] = useState([])
   const [saving, setSaving] = useState(false)
+  const { touch, reset, setTried, shown } = useValidation()
 
   useEffect(() => { api.getBlocks().then(setBlocks) }, [])
   useEffect(() => {
@@ -438,14 +561,25 @@ function EditMemorialModal() {
       blockId: record.blockId || '', lotNo: record.lotNo ?? '', quote: record.quote || '',
       status: record.status || MEMORIAL_STATUS.PENDING,
     })
-  }, [isOpen, record])
+    reset()
+  }, [isOpen, record, reset])
   if (!isOpen || !record) return null
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const set = (k, filter) => (e) => {
+    const value = filter ? filter(e.target.value) : e.target.value
+    setForm((f) => ({ ...f, [k]: value }))
+  }
+  const errors = memorialErrors(form, blocks, { tributeKey: 'quote' })
+  const err = shown(errors)
+
   const submit = async () => {
-    if (!form.name) return
+    setTried(true)
+    if (hasErrors(errors)) return
     setSaving(true)
-    const ok = await runAction(() => api.updateMemorial(record.id, form), 'Memorial updated.')
+    const ok = await runAction(
+      () => api.updateMemorial(record.id, { ...form, name: String(form.name).trim(), quote: String(form.quote || '').trim() }),
+      'Memorial updated.',
+    )
     setSaving(false)
     if (ok) closeModal()
   }
@@ -453,7 +587,11 @@ function EditMemorialModal() {
   return (
     <Modal id="modal-editmemorial" title="Edit Memorial" subtitle={record.name}>
       <div className="modal-row">
-        <div className="modal-field"><label>Name of Deceased</label><input value={form.name || ''} onChange={set('name')} /></div>
+        <div className="modal-field">
+          <label>Name of Deceased</label>
+          <input value={form.name || ''} onChange={set('name')} onBlur={touch('name')} maxLength={100} style={invalidStyle(err('name'))} />
+          <FieldError msg={err('name')} />
+        </div>
         <div className="modal-field">
           <label>Status</label>
           <select value={form.status} onChange={set('status')}>
@@ -462,23 +600,40 @@ function EditMemorialModal() {
         </div>
       </div>
       <div className="modal-row">
-        <div className="modal-field"><label>Birth Date</label><input type="date" value={form.birth || ''} onChange={set('birth')} /></div>
-        <div className="modal-field"><label>Death Date</label><input type="date" value={form.death || ''} onChange={set('death')} /></div>
+        <div className="modal-field">
+          <label>Birth Date</label>
+          <input type="date" min="1900-01-01" max={todayISO()} value={form.birth || ''} onChange={set('birth')} onBlur={touch('birth')} style={invalidStyle(err('birth'))} />
+          <FieldError msg={err('birth')} />
+        </div>
+        <div className="modal-field">
+          <label>Death Date</label>
+          <input type="date" min={form.birth || '1900-01-01'} max={todayISO()} value={form.death || ''} onChange={set('death')} onBlur={touch('death')} style={invalidStyle(err('death'))} />
+          <FieldError msg={err('death')} />
+        </div>
       </div>
       <div className="modal-row">
         <div className="modal-field">
           <label>Block</label>
-          <select value={form.blockId || ''} onChange={set('blockId')}>
+          <select value={form.blockId || ''} onChange={set('blockId')} onBlur={touch('blockId')} style={invalidStyle(err('blockId'))}>
             <option value="">Select a block…</option>
             {blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
+          <FieldError msg={err('blockId')} />
         </div>
-        <div className="modal-field"><label>Lot Number</label><input type="number" min="1" value={form.lotNo ?? ''} onChange={set('lotNo')} /></div>
+        <div className="modal-field">
+          <label>Lot Number</label>
+          <input inputMode="numeric" maxLength={5} value={form.lotNo ?? ''} onChange={set('lotNo', onlyDigits)} onBlur={touch('lotNo')} style={invalidStyle(err('lotNo'))} />
+          <FieldError msg={err('lotNo')} />
+        </div>
       </div>
-      <div className="modal-field"><label>Tribute Message</label><textarea value={form.quote || ''} onChange={set('quote')} /></div>
+      <div className="modal-field">
+        <label>Tribute Message</label>
+        <textarea value={form.quote || ''} onChange={set('quote')} onBlur={touch('quote')} maxLength={500} style={invalidStyle(err('quote'))} />
+        <FieldError msg={err('quote')} />
+      </div>
       <div className="modal-actions">
         <button className="btn btn-outline" onClick={closeModal} disabled={saving}>Cancel</button>
-        <button className="btn btn-primary" onClick={submit} disabled={saving || !form.name}>{saving ? 'Saving…' : 'Save Changes'}</button>
+        <button className="btn btn-primary" onClick={submit} disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
       </div>
     </Modal>
   )

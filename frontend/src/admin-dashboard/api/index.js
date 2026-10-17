@@ -430,6 +430,24 @@ export function removeAdminStaff(id) {
   }))
 }
 
+// ── Account: the signed-in admin changes their OWN password ──────────────────
+// Supabase doesn't ask for the old password, so we check it first by signing in
+// again with it. Creating passwords for OTHER staff needs a server function
+// (service_role key), so that isn't done from the browser.
+export async function changeOwnPassword(currentPassword, newPassword) {
+  if (!USE_REMOTE) throw new Error('Changing passwords needs the Supabase connection (VITE_USE_REMOTE=true).')
+  const { data: { user }, error: userErr } = await supabase.auth.getUser()
+  if (userErr) throw userErr
+  if (!user?.email) throw new Error('You are not signed in.')
+
+  const { error: checkErr } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPassword })
+  if (checkErr) throw new Error('Current password is incorrect.')
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw error
+  return { ok: true }
+}
+
 // ── Memorials — public feed + admin moderation queue ─────────────────────────
 export async function getMemorials() {
   if (USE_REMOTE) {
