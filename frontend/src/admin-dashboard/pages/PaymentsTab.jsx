@@ -18,16 +18,17 @@ import { formatDate } from '../utils/date'
 import { peso } from '../utils/format'
 import * as paymentsApi from '../api/paymentsApi'
 import { USE_REMOTE } from '../api/client'
+import { downloadStatementPdf, downloadStatementExcel } from '../utils/paymentStatement'
 
 const today = () => new Date().toISOString().slice(0, 10)
 const { CLOSED_RESERVATION, receiptToReview, cashToReceive } = paymentsApi
 const CLOSED = CLOSED_RESERVATION
 
 // ── Small shared dialog (uses the same .modal styles as AllModals) ──────────
-function Dialog({ title, subtitle, onClose, children }) {
+function Dialog({ title, subtitle, onClose, wide, children }) {
   return (
     <div className="modal-overlay open" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal">
+      <div className={`modal${wide ? ' modal-wide' : ''}`}>
         <h3>{title}</h3>
         {subtitle && <p>{subtitle}</p>}
         {children}
@@ -67,6 +68,109 @@ function ReceiptViewer({ path, title, onClose }) {
   )
 }
 
+// ── Client payment history (opens when the admin clicks a client's name) ────
+// Lists every monthly installment payment of one client, newest first.
+// If the client has several installment lots, a tab per lot keeps the numbers apart.
+// Voided / rejected / pending payments stay visible but only verified ones count as paid.
+const sameClient = (a, b) => (a.userId && b.userId ? a.userId === b.userId : a.applicantName === b.applicantName)
+
+function ClientHistoryDialog({ reservation, reservations, installments, onClose, onReceipt, onVerify, onReject, onVoid }) {
+  const lots = reservations.filter((x) => x.id === reservation.id || (sameClient(x, reservation) && x.paymentOption === 'installment'))
+  const [lotId, setLotId] = useState(reservation.id)
+  const [downloading, setDownloading] = useState('') // '' | 'pdf' | 'excel'
+  const [dlError, setDlError] = useState('')
+  const r = lots.find((x) => x.id === lotId) || reservation
+  const lotLabel = (x) => `${x.blockName || '—'} · Lot ${x.lotNo ?? '—'}`
+  const prog = paymentsApi.installmentProgress(r, installments)
+  const rows = installments
+    .filter((p) => p.reservationId === r.id)
+    .sort((a, b) => String(b.paidOn).localeCompare(String(a.paidOn)) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+
+  const download = async (kind) => {
+    setDlError(''); setDownloading(kind)
+    try {
+      const statement = { reservation: r, progress: prog, rows }
+      await (kind === 'pdf' ? downloadStatementPdf(statement) : downloadStatementExcel(statement))
+    } catch (err) {
+      console.error(err)
+      setDlError('Could not create the file. Please try again.')
+    } finally {
+      setDownloading('')
+    }
+  }
+
+  const tiles = [
+    ['Lot price', peso(r.price)],
+    ['Monthly', peso(prog.monthly)],
+    ['Months paid', `${prog.monthsCovered}/${prog.months}`],
+    ['Total paid', peso(prog.paid)],
+    ['Remaining', peso(prog.left)],
+  ]
+
+  return (
+    <Dialog wide title={r.applicantName} subtitle={`${r.contactNumber || r.email || 'No contact'} · ${lotLabel(r)} · ${INSTALLMENT_TERM_LABEL[r.installmentTerm] || 'Installment'}`} onClose={onClose}>
+      {lots.length > 1 && (
+        <div className="pay-lot-tabs">
+          {lots.map((x) => (
+            <button key={x.id} type="button" className={`pay-lot-tab${x.id === r.id ? ' active' : ''}`} onClick={() => setLotId(x.id)}>{lotLabel(x)}</button>
+          ))}
+        </div>
+      )}
+
+      <div className="pay-hist-tiles">
+        {tiles.map(([label, value]) => (
+          <div key={label} className="pay-hist-tile">
+            <span className="detail-label">{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="table-wrap">
+        <table className="res-table">
+          <thead>
+            <tr><th>Paid on</th><th>Type</th><th>Method</th><th>Amount</th><th>Status</th><th className="col-actions">Actions</th></tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={6} className="pay-empty">No payments recorded for this lot yet.</td></tr>}
+            {rows.map((p) => {
+              const meta = INSTALLMENT_PAYMENT_STATUS_META[p.status] || INSTALLMENT_PAYMENT_STATUS_META.pending
+              const dead = p.status === 'voided' || p.status === 'rejected'
+              return (
+                <tr key={p.id} className={dead ? 'pay-row-dead' : ''}>
+                  <td>{formatDate(String(p.paidOn).slice(0, 10))}</td>
+                  <td>{p.kind === 'adjustment' ? 'Adjustment' : 'Monthly'}</td>
+                  <td>{PAYMENT_METHOD_LABEL[p.method] || p.method || '—'}</td>
+                  <td style={{ fontWeight: 700 }} className="pay-amt">{peso(p.amount)}</td>
+                  <td><span className={`badge ${meta.badge}`}>{meta.label}</span>{p.note && <div className="pay-sub" title={p.note}>{p.note}</div>}</td>
+                  <td className="col-actions"><div className="action-cell">
+                    {p.receiptPath && <button className="btn btn-ghost btn-xs" onClick={() => onReceipt({ path: p.receiptPath, title: `Monthly receipt · ${r.applicantName}` })}>View receipt</button>}
+                    {p.status === 'pending' && (
+                      <>
+                        <button className="btn btn-primary btn-xs" onClick={() => onVerify(p)}>Verify</button>
+                        <button className="btn btn-danger btn-xs" onClick={() => onReject(p)}>Reject</button>
+                      </>
+                    )}
+                    {p.status === 'verified' && <button className="btn btn-outline btn-xs" onClick={() => onVoid(p)}>Void</button>}
+                  </div></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="pay-sub" style={{ marginTop: 10, maxWidth: 'none' }}>Only verified payments count toward the total paid. Voided, rejected and pending ones are shown for reference.</p>
+
+      {dlError && <p className="pay-sub" style={{ color: 'var(--danger, #b91c1c)', maxWidth: 'none' }}>{dlError}</p>}
+      <div className="modal-actions">
+        <button className="btn btn-outline" disabled={!!downloading} onClick={() => download('excel')}>{downloading === 'excel' ? 'Preparing…' : 'Download Excel'}</button>
+        <button className="btn btn-outline" disabled={!!downloading} onClick={() => download('pdf')}>{downloading === 'pdf' ? 'Preparing…' : 'Download PDF'}</button>
+        <button className="btn btn-primary" onClick={onClose}>Close</button>
+      </div>
+    </Dialog>
+  )
+}
+
 // ── Payment Review tab ───────────────────────────────────────────────────────
 export function PaymentReviewTab() {
   const { paymentReservations, installments, loading, error } = usePaymentOverview()
@@ -74,6 +178,7 @@ export function PaymentReviewTab() {
   const [view, setView] = useState('action') // 'action' | 'all'
   const [instView, setInstView] = useState('pending')
   const [receipt, setReceipt] = useState(null)   // { path, title }
+  const [historyOf, setHistoryOf] = useState(null) // reservation id whose payment history is open
   const [dialog, setDialog] = useState(null)     // { type, target }
   const [form, setForm] = useState({})
   const [busy, setBusy] = useState(false)
@@ -81,6 +186,18 @@ export function PaymentReviewTab() {
   const byId = Object.fromEntries(paymentReservations.map((r) => [r.id, r]))
   const resRows = paymentReservations.filter((r) => view === 'all' || receiptToReview(r) || cashToReceive(r))
   const instRows = installments.filter((p) => instView === 'all' || p.status === instView)
+  // One row per client + lot: the filter decides WHICH clients appear (they have at
+  // least one payment with that status); the numbers always cover all their payments.
+  const clientRows = [...new Set(instRows.map((p) => p.reservationId))]
+    .map((id) => {
+      const r = byId[id]
+      if (!r) return null
+      const mine = installments.filter((p) => p.reservationId === id)
+      const last = mine.map((p) => String(p.paidOn).slice(0, 10)).sort().pop()
+      return { r, count: mine.length, last, prog: paymentsApi.installmentProgress(r, installments) }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(b.last).localeCompare(String(a.last)))
   const installmentReservations = paymentReservations.filter((r) => r.paymentOption === 'installment' && r.status === 'confirmed')
 
   const open = (type, target, initial = {}) => { setForm(initial); setDialog({ type, target }) }
@@ -197,43 +314,47 @@ export function PaymentReviewTab() {
         <div className="table-wrap">
           <table className="res-table">
             <thead>
-              <tr><th>Paid on</th><th>Client</th><th>Lot</th><th>Type</th><th>Method</th><th>Amount</th><th>Progress</th><th>Status</th><th className="col-actions">Actions</th></tr>
+              <tr><th>Last payment</th><th>Client</th><th>Lot</th><th>Payments</th><th>Total paid</th><th>Progress</th><th>Review</th><th className="col-actions">Actions</th></tr>
             </thead>
             <tbody>
-              {!loading && instRows.length === 0 && <tr><td colSpan={9} className="pay-empty">No payments here.</td></tr>}
-              {instRows.map((p) => {
-                const r = byId[p.reservationId]
-                const meta = INSTALLMENT_PAYMENT_STATUS_META[p.status] || INSTALLMENT_PAYMENT_STATUS_META.pending
-                const prog = r ? paymentsApi.installmentProgress(r, installments) : null
-                return (
-                  <tr key={p.id}>
-                    <td>{formatDate(String(p.paidOn).slice(0, 10))}</td>
-                    <td style={{ fontWeight: 600 }}>{r?.applicantName || '—'}</td>
-                    <td>{lot(r)}</td>
-                    <td>{p.kind === 'adjustment' ? 'Adjustment' : 'Monthly'}</td>
-                    <td>{PAYMENT_METHOD_LABEL[p.method] || p.method || '—'}</td>
-                    <td style={{ fontWeight: 700 }}>{peso(p.amount)}</td>
-                    <td>{prog ? `${prog.monthsCovered}/${prog.months} mo · ${peso(prog.left)} left` : '—'}</td>
-                    <td><span className={`badge ${meta.badge}`}>{meta.label}</span>{p.note && <div className="pay-sub" title={p.note}>{p.note}</div>}</td>
-                    <td className="col-actions"><div className="action-cell">
-                      {p.receiptPath && <button className="btn btn-ghost btn-xs" onClick={() => setReceipt({ path: p.receiptPath, title: `Monthly receipt · ${r?.applicantName || ''}` })}>View receipt</button>}
-                      {p.status === 'pending' && (
-                        <>
-                          <button className="btn btn-primary btn-xs" onClick={() => runAction(() => paymentsApi.setInstallmentPaymentStatus(p.id, 'verified'), 'Monthly payment verified.')}>Verify</button>
-                          <button className="btn btn-danger btn-xs" onClick={() => open('reject-monthly', p, { note: '' })}>Reject</button>
-                        </>
-                      )}
-                      {p.status === 'verified' && (
-                        <button className="btn btn-outline btn-xs" onClick={() => open('void-monthly', p, { note: '' })}>Void</button>
-                      )}
-                    </div></td>
-                  </tr>
-                )
-              })}
+              {loading && <tr><td colSpan={8} className="pay-empty">Loading payments…</td></tr>}
+              {!loading && clientRows.length === 0 && <tr><td colSpan={8} className="pay-empty">No payments here.</td></tr>}
+              {clientRows.map(({ r, count, last, prog }) => (
+                <tr key={r.id}>
+                  <td>{formatDate(last)}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    <button type="button" className="pay-client-link" title="View payment history" onClick={() => setHistoryOf(r.id)}>{r.applicantName}</button>
+                    <div className="pay-sub">{r.contactNumber || r.email}</div>
+                  </td>
+                  <td>{lot(r)}</td>
+                  <td>{count} {count === 1 ? 'payment' : 'payments'}</td>
+                  <td style={{ fontWeight: 700 }}>{peso(prog.paid)}</td>
+                  <td>{prog.monthsCovered}/{prog.months} mo · {peso(prog.left)} left</td>
+                  <td>{prog.pending > 0 ? <span className="badge badge-pending">{prog.pending} to review</span> : '—'}</td>
+                  <td className="col-actions"><div className="action-cell">
+                    <button className={`btn btn-xs ${prog.pending > 0 ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setHistoryOf(r.id)}>
+                      {prog.pending > 0 ? 'Review' : 'View history'}
+                    </button>
+                  </div></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {historyOf && byId[historyOf] && (
+        <ClientHistoryDialog
+          reservation={byId[historyOf]}
+          reservations={paymentReservations}
+          installments={installments}
+          onClose={() => setHistoryOf(null)}
+          onReceipt={setReceipt}
+          onVerify={(p) => runAction(() => paymentsApi.setInstallmentPaymentStatus(p.id, 'verified'), 'Monthly payment verified.')}
+          onReject={(p) => open('reject-monthly', p, { note: '' })}
+          onVoid={(p) => open('void-monthly', p, { note: '' })}
+        />
+      )}
 
       {receipt && <ReceiptViewer path={receipt.path} title={receipt.title} onClose={() => setReceipt(null)} />}
 

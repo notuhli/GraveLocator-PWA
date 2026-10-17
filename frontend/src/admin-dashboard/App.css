@@ -780,3 +780,26 @@ input:disabled, select:disabled, textarea:disabled { background-color: #F3F4F6; 
 /* Keep fields inside their column in two-column dialogs (e.g. Update Lot) */
 .modal-row > * { min-width: 0; }
 .modal-field :is(input, select, textarea) { width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* ── Payments: client payment-history popup ─────────────────────────────── */
+.modal.modal-wide { width: 780px; }
+.pay-client-link {
+  background: none; border: none; padding: 0; font: inherit; font-weight: 600;
+  color: var(--sage); cursor: pointer; text-align: left;
+  text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px;
+  transition: text-decoration-color .15s;
+}
+.pay-client-link:hover, .pay-client-link:focus-visible { text-decoration-color: currentColor; outline: none; }
+.pay-lot-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.pay-lot-tab {
+  border: 1.5px solid var(--lgray); background: #fff; color: var(--dgray);
+  border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.pay-lot-tab.active { border-color: var(--mint); background: var(--pgreen); color: var(--sage); }
+.pay-hist-tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
+.pay-hist-tile { background: var(--cream); border: 1px solid var(--lgray); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pay-hist-tile .detail-label { font-size: 10.5px; }
+.pay-hist-tile strong { font-size: 15px; color: var(--charcoal); white-space: nowrap; }
+.pay-row-dead td { opacity: .6; }
+.pay-row-dead .pay-amt { text-decoration: line-through; }
+@media (max-width: 700px) { .pay-hist-tiles { grid-template-columns: repeat(2, 1fr); } }
