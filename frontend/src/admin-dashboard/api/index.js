@@ -391,14 +391,40 @@ export function updateUser(id, patch) {
   })
 }
 
+// Deletes the account AND everything it owns: installment payments,
+// reservations (their lots go back to available), memorials, profile and login,
+// all in one transaction (supabase/admin-delete-user.sql). The function returns
+// the receipt photos to remove; Storage files can't be deleted from SQL, so
+// they're removed here afterwards.
 export function deleteUser(id) {
   return mutate(async () => {
     if (USE_REMOTE) {
-      // Deletes the login (auth.users) and profile together, via a
-      // security-definer function that checks the caller is an admin.
-      const { error } = await supabase.rpc('admin_delete_user', { p_user_id: id })
-      if (error) throw error
-      return { id }
+      const { data, error } = await supabase.rpc('admin_delete_user', { p_user_id: id })
+      if (error) {
+        if (/foreign key|violates/i.test(error.message || '')) {
+          throw new Error('This user still has linked data. Run supabase/admin-delete-user.sql in the Supabase SQL Editor, then try again.')
+        }
+        throw error
+      }
+
+      // Remove receipt photos, grouped by bucket. The account is already gone,
+      // so a failure here only leaves orphan files; it doesn't undo the delete.
+      const byBucket = {}
+      for (const f of data?.files || []) {
+        if (f?.bucket && f?.path) (byBucket[f.bucket] ||= []).push(f.path)
+      }
+      for (const [bucket, paths] of Object.entries(byBucket)) {
+        const { error: stErr } = await supabase.storage.from(bucket).remove(paths)
+        if (stErr) console.warn(`User deleted, but some files in "${bucket}" were not removed:`, stErr.message)
+      }
+
+      return {
+        id,
+        reservations: data?.reservations ?? 0,
+        payments: data?.payments ?? 0,
+        memorials: data?.memorials ?? 0,
+        lotsReleased: data?.lots_released ?? 0,
+      }
     }
     return local(() => {
       const idx = USERS.findIndex((u) => u.id === id)

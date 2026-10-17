@@ -27,7 +27,7 @@ function timeAgo(iso) {
 
 export function UsersPage() {
   const { users, loading, reload } = useUsers()
-  const { openModal } = useAdmin()
+  const { openModal, confirmAction } = useAdmin()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
@@ -43,7 +43,14 @@ export function UsersPage() {
     (!search || `${u.name} ${u.email}`.toLowerCase().includes(search.toLowerCase()))
   )
 
-  const removeUser = async (id) => { await api.deleteUser(id); reload() }
+  // Deleting a user also deletes everything they own (see api.deleteUser).
+  const removeUser = (u) => confirmAction({
+    title: 'Delete user account?',
+    message: `This permanently deletes ${u.name}'s account and everything linked to it: reservations, installment payments, memorials, and receipt photos. Lots from their pending or confirmed reservations go back to Available, and their payments will no longer count in Reports. This can't be undone.`,
+    confirmLabel: 'Delete account',
+    successMessage: `${u.name}'s account and data were deleted.`,
+    onConfirm: async () => { await api.deleteUser(u.id); reload() },
+  })
 
   return (
     <div>
@@ -90,7 +97,12 @@ export function UsersPage() {
                     <td><div className="action-cell">
                       <button className="btn btn-ghost btn-xs" onClick={() => openModal('modal-edituser', u)}>Edit</button>
                       <button className="btn btn-outline btn-xs">View</button>
-                      <button className="btn btn-danger btn-xs" onClick={() => removeUser(u.id)}>Delete</button>
+                      <button
+                        className="btn btn-danger btn-xs"
+                        onClick={() => removeUser(u)}
+                        disabled={u.role === 'admin'}
+                        title={u.role === 'admin' ? "Admin accounts can't be deleted here. Change the role to user first." : 'Delete account and all of its data'}
+                      >Delete</button>
                     </div></td>
                   </tr>
                 )
