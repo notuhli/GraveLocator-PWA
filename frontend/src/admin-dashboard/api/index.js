@@ -58,8 +58,27 @@ function lotFromRow(row) {
     classification: row.classification, status: row.status,
     intermentCount: row.interment_count, verified: row.verified,
     deceasedNames: row.deceased_names || [],
+    deceasedRecords: deceasedRecordsFromRow(row),
   }
 }
+
+// Each person buried in a lot: { name, deathDate, burialDate } (dates 'YYYY-MM-DD'
+// or null). Lots saved before supabase/deceased-dates.sql only have names.
+function deceasedRecordsFromRow(row) {
+  const recs = Array.isArray(row.deceased_records) ? row.deceased_records.filter((r) => r && r.name) : []
+  if (recs.length) return recs.map((r) => ({ name: String(r.name), deathDate: r.deathDate || null, burialDate: r.burialDate || null }))
+  return (row.deceased_names || []).map((name) => ({ name, deathDate: null, burialDate: null }))
+}
+
+// Accepts names (strings) or { name, deathDate, burialDate } and cleans them.
+function toDeceasedRecords(list) {
+  return (list || [])
+    .map((d) => (typeof d === 'string' ? { name: d } : d || {}))
+    .map((d) => ({ name: String(d.name || '').trim(), deathDate: d.deathDate || null, burialDate: d.burialDate || null }))
+    .filter((d) => d.name)
+}
+
+const MISSING_DATES_SQL = 'Dates of death need a database update first: run supabase/deceased-dates.sql in the Supabase SQL Editor.'
 
 // ── Site / blocks — identical surface to the User-Dashboard's api/index.js ──
 export function getSite() {
@@ -109,13 +128,19 @@ export async function getLot(blockId, lotNo) {
 // `intermentCount` is optional — pass it when status === STATUS.WITH_INTERMENT
 // so the number of burials in the lot is recorded alongside the status.
 // Requires the signed-in Supabase user to have profiles.role = 'admin' (RLS).
-// `deceasedNames` is optional too — an array of names replaces the lot's list
-// (pass [] to clear it); leave it undefined to keep the saved names.
-export function updateLotStatus(blockId, lotNo, status, intermentCount, deceasedNames) {
+// `deceased` is optional too — an array of names or of
+// { name, deathDate, burialDate } replaces the lot's list (pass [] to clear it);
+// leave it undefined to keep what is saved.
+export function updateLotStatus(blockId, lotNo, status, intermentCount, deceased) {
   return mutate(async () => {
   const patch = { status }
   if (intermentCount != null) patch.interment_count = Number(intermentCount)
-  if (Array.isArray(deceasedNames)) patch.deceased_names = deceasedNames.map((n) => String(n).trim()).filter(Boolean)
+  let records = null
+  if (Array.isArray(deceased)) {
+    records = toDeceasedRecords(deceased)
+    patch.deceased_records = records
+    patch.deceased_names = records.map((r) => r.name)
+  }
 
   if (USE_REMOTE) {
     const { data, error } = await supabase
@@ -124,7 +149,10 @@ export function updateLotStatus(blockId, lotNo, status, intermentCount, deceased
       .eq('block_id', blockId)
       .eq('lot_no', Number(lotNo))
       .select()
-    if (error) throw error
+    if (error) {
+      if (/deceased_records/i.test(error.message || '')) throw new Error(MISSING_DATES_SQL)
+      throw error
+    }
     return lotFromRow(assertChanged(data, 'update this lot'))
   }
   // Local stub: mutate the cached in-memory lot so the UI reflects the change
@@ -135,7 +163,10 @@ export function updateLotStatus(blockId, lotNo, status, intermentCount, deceased
     if (lot) {
       lot.status = status
       if (intermentCount != null) lot.intermentCount = Number(intermentCount)
-      if (patch.deceased_names) lot.deceasedNames = patch.deceased_names
+      if (records) {
+        lot.deceasedRecords = records
+        lot.deceasedNames = patch.deceased_names
+      }
     }
     return lot || null
   })
@@ -159,7 +190,9 @@ export async function getActiveReservedLotIds(blockIds) {
 // or updated; with `replace`, lots NOT in the file are removed (except ones
 // with an active reservation). The block becomes a grid block, its max lot is
 // recalculated, and `gridCols` (if given) sets how many columns the grid has.
-// Returns { inserted, updated, unchanged, deleted, kept }.
+// Dates of death/burial from the file are saved right after (only for lots
+// whose dates changed); names-only changes keep saved dates (DB trigger).
+// Returns { inserted, updated, unchanged, deleted, kept, datesSaved }.
 export function importLots(blockId, rows, { replace = false, gridCols = null } = {}) {
   return mutate(async () => {
     const payload = rows.map((r) => ({
@@ -182,7 +215,8 @@ export function importLots(blockId, rows, { replace = false, gridCols = null } =
         }
         throw error
       }
-      return data
+      const datesSaved = await saveImportedDates(blockId, rows)
+      return { ...(data || {}), datesSaved }
     }
 
     // Local demo mode: update the in-memory seed so the grid reflects the file.
@@ -191,14 +225,19 @@ export function importLots(blockId, rows, { replace = false, gridCols = null } =
       const lots = getLotsForBlock(blockId)
       const result = { inserted: 0, updated: 0, unchanged: 0, deleted: 0, kept: 0 }
       const ids = new Set()
-      payload.forEach((p) => {
+      payload.forEach((p, i) => {
         const id = p.lot_no != null ? `${blockId}-${p.lot_no}` : `${blockId}-x${p.extra_index}`
         ids.add(id)
         const cur = lots.find((l) => l.id === id)
         const names = p.deceased_names ?? cur?.deceasedNames ?? []
-        const next = { id, blockId, lotNo: p.lot_no, classification: p.classification, status: p.status, intermentCount: p.interment_count, deceasedNames: names, verified: true }
+        const src = rows[i] || {}
+        const oldRecs = cur?.deceasedRecords || []
+        const records = src.deceasedRecords
+          ? toDeceasedRecords(src.deceasedRecords)
+          : names.map((n) => oldRecs.find((r) => r.name.toLowerCase() === n.toLowerCase()) || { name: n, deathDate: null, burialDate: null })
+        const next = { id, blockId, lotNo: p.lot_no, classification: p.classification, status: p.status, intermentCount: p.interment_count, deceasedNames: names, deceasedRecords: records, verified: true }
         if (!cur) { lots.push(next); result.inserted += 1 }
-        else if (cur.status !== next.status || cur.classification !== next.classification || (cur.intermentCount || 0) !== next.intermentCount || (cur.deceasedNames || []).join('\n') !== names.join('\n')) {
+        else if (cur.status !== next.status || cur.classification !== next.classification || (cur.intermentCount || 0) !== next.intermentCount || (cur.deceasedNames || []).join('\n') !== names.join('\n') || src.recordsChanged) {
           Object.assign(cur, next); result.updated += 1
         } else result.unchanged += 1
       })
@@ -217,6 +256,28 @@ export function importLots(blockId, rows, { replace = false, gridCols = null } =
       return result
     })
   })
+}
+
+// Saves the dates of death/burial from an Excel import, a few lots at a time.
+async function saveImportedDates(blockId, rows) {
+  const todo = rows.filter((r) => r.recordsChanged && r.lotNo != null && Array.isArray(r.deceasedRecords))
+  let saved = 0
+  for (let i = 0; i < todo.length; i += 8) {
+    const batch = todo.slice(i, i + 8)
+    const results = await Promise.all(batch.map((r) => supabase
+      .from('lots')
+      .update({ deceased_records: toDeceasedRecords(r.deceasedRecords) })
+      .eq('block_id', blockId)
+      .eq('lot_no', r.lotNo)))
+    for (const { error } of results) {
+      if (error) {
+        if (/deceased_records/i.test(error.message || '')) throw new Error(`Lots were imported, but not the dates. ${MISSING_DATES_SQL}`)
+        throw error
+      }
+    }
+    saved += batch.length
+  }
+  return saved
 }
 
 // ── Pricing ──────────────────────────────────────────────────────────────────

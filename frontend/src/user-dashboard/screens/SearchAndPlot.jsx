@@ -5,7 +5,14 @@ import { CLASSIFICATION } from '../config/constants'
 import { statusLabel, statusMeta, isSellable } from '../config/status'
 import { peso, percent, intermentMarks } from '../utils/format'
 import { addRecentlyViewed } from '../hooks/useRecentlyViewed'
-import { getLot, searchDeceased } from '../api'
+import { getLot, searchDeceased, deceasedRecordsOf } from '../api'
+
+// 'YYYY-MM-DD' → "Mar 4, 2019" (read as a local date, so it never shifts a day)
+function longDate(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return ''
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
 
 // ── SearchScreen ─────────────────────────────────────────────────────────────
 // One box searches two things:
@@ -135,6 +142,7 @@ export function SearchScreen({ onNavigate, onBack }) {
                       <div style={{ minWidth:0 }}>
                         <p className="fw7 f15 c-charcoal" style={{ margin:'0 0 2px' }}>🕊️ <Highlight text={r.name} words={words} /></p>
                         <p className="f12 c-stone" style={{ margin:0 }}>
+                          {r.deathDate && <>d. {longDate(r.deathDate)} · </>}
                           {block?.name || r.blockId} · Lot {r.lotNo ?? '—'}{block?.lawnName ? ` · ${block.lawnName}` : ''}
                         </p>
                       </div>
@@ -217,9 +225,9 @@ export function PlotDetailScreen({ onNavigate, onBack, routeLot }) {
     return () => { alive = false }
   }, [hasLotRef, lot.blockId, lot.lotNo])
   const shown = fresh
-    ? { ...lot, status: fresh.status, classification: fresh.classification, intermentCount: fresh.intermentCount, deceasedNames: fresh.deceasedNames }
+    ? { ...lot, status: fresh.status, classification: fresh.classification, intermentCount: fresh.intermentCount, deceasedNames: fresh.deceasedNames, deceasedRecords: fresh.deceasedRecords }
     : lot
-  const deceasedNames = shown.deceasedNames || []
+  const deceased = deceasedRecordsOf(shown)
 
   const meta = statusMeta(shown.status)
   const marks = intermentMarks(shown.intermentCount)
@@ -291,13 +299,20 @@ export function PlotDetailScreen({ onNavigate, onBack, routeLot }) {
         </div>
 
         {/* Names of the deceased (from the office's records) */}
-        {deceasedNames.length > 0 && (
+        {deceased.length > 0 && (
           <div className="card" style={{ marginBottom:14 }}>
             <p className="section-label" style={{ margin:'0 0 8px' }}>Interred Here</p>
-            {deceasedNames.map((n, i) => (
-              <div key={i} className="deceased-row">
+            {deceased.map((d, i) => (
+              <div key={i} className="deceased-row" style={{ alignItems:'flex-start' }}>
                 <span aria-hidden="true">🕊️</span>
-                <span className="fw7 c-charcoal">{n}</span>
+                <span>
+                  <span className="fw7 c-charcoal" style={{ display:'block' }}>{d.name}</span>
+                  {(d.deathDate || d.burialDate) && (
+                    <span className="f12 c-stone" style={{ display:'block' }}>
+                      {[d.deathDate && `Died ${longDate(d.deathDate)}`, d.burialDate && `Buried ${longDate(d.burialDate)}`].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </span>
               </div>
             ))}
           </div>

@@ -59,7 +59,7 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
       for (const p of plan.plans) {
         if (!p.rows.length) continue
         const res = await api.importLots(p.blockId, p.rows, { replace, gridCols: cols[p.blockId] })
-        done.push(`${p.block?.name || p.blockId}: ${res?.inserted ?? 0} new, ${res?.updated ?? 0} updated${replace ? `, ${res?.deleted ?? 0} removed` : ''}`)
+        done.push(`${p.block?.name || p.blockId}: ${res?.inserted ?? 0} new, ${res?.updated ?? 0} updated${replace ? `, ${res?.deleted ?? 0} removed` : ''}${res?.datesSaved ? `, ${res.datesSaved} with new dates` : ''}`)
       }
       notify(`Plots imported — ${done.join(' · ')}`)
       onClose()
@@ -99,6 +99,7 @@ export default function PlotImportModal({ blocks, defaultBlockId, onClose }) {
         <p>
           Add lots to blocks that have no data yet, or update existing lots. Columns:
           <strong> Block, Lot No, Classification, Status, Interments, Name of Deceased 1, 2…</strong>
+          {' '}(optional: <strong>Date of Death 1, 2…</strong> and <strong>Date of Burial 1, 2…</strong>)
           {' '}— the office's Sales Control sheet (Lot No., Class, Buyer's Name, W/ Interment, Name of Deceased) works as-is.
         </p>
 

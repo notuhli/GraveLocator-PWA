@@ -33,7 +33,23 @@ function lotFromRow(row) {
     classification: row.classification, status: row.status,
     intermentCount: row.interment_count, verified: row.verified,
     deceasedNames: row.deceased_names || [],
+    deceasedRecords: deceasedRecordsFromRow(row),
   }
+}
+
+// Each person buried in a lot: { name, deathDate, burialDate } (dates 'YYYY-MM-DD'
+// or null). Lots saved before supabase/deceased-dates.sql only have names.
+function deceasedRecordsFromRow(row) {
+  const recs = Array.isArray(row.deceased_records) ? row.deceased_records.filter((r) => r && r.name) : []
+  if (recs.length) return recs.map((r) => ({ name: String(r.name), deathDate: r.deathDate || null, burialDate: r.burialDate || null }))
+  return (row.deceased_names || []).map((name) => ({ name, deathDate: null, burialDate: null }))
+}
+
+// Same, for lots that came from local demo data (names only).
+export function deceasedRecordsOf(lot) {
+  const recs = Array.isArray(lot?.deceasedRecords) ? lot.deceasedRecords.filter((r) => r && r.name) : []
+  if (recs.length) return recs
+  return (lot?.deceasedNames || []).map((name) => ({ name, deathDate: null, burialDate: null }))
 }
 function memorialFromRow(row) {
   return {
@@ -94,24 +110,39 @@ export async function getLot(blockId, lotNo) {
 // Finds lots whose interred names match what was typed — every word in any
 // order ("romeo rosales" → "Rosales, Romeo"), plus close spellings on the
 // server ("rosalez" → "Rosales"). Uses supabase/plot-import.sql → search_deceased.
-// Returns [{ lotId, blockId, lotNo, classification, status, intermentCount, name }]
+// Returns [{ lotId, blockId, lotNo, classification, status, intermentCount, name, deathDate }]
 export async function searchDeceased(query, limit = 30) {
   const q = String(query || '').trim()
   if (q.length < 2) return []
   if (USE_REMOTE) {
     const { data, error } = await supabase.rpc('search_deceased', { p_query: q, p_limit: limit })
     if (error) throw error
-    return (data || []).map((r) => ({
+    const results = (data || []).map((r) => ({
       lotId: r.lot_id, blockId: r.block_id, lotNo: r.lot_no, classification: r.classification,
-      status: r.status, intermentCount: r.interment_count, name: r.name,
+      status: r.status, intermentCount: r.interment_count, name: r.name, deathDate: null,
     }))
+
+    // Add each person's date of death (helps tell apart people with the same name).
+    // Skipped quietly if supabase/deceased-dates.sql hasn't been run yet.
+    const lotIds = [...new Set(results.map((r) => r.lotId).filter(Boolean))]
+    if (lotIds.length) {
+      const { data: lots, error: datesErr } = await supabase.from('lots').select('id, deceased_records').in('id', lotIds)
+      if (!datesErr) {
+        const byLot = Object.fromEntries((lots || []).map((l) => [l.id, l.deceased_records || []]))
+        results.forEach((r) => {
+          const hit = (byLot[r.lotId] || []).find((p) => String(p?.name || '').toLowerCase() === String(r.name).toLowerCase())
+          r.deathDate = hit?.deathDate || null
+        })
+      }
+    }
+    return results
   }
   // Local demo data: same "every word, any order" match (no fuzzy spelling).
   const words = q.toLowerCase().replace(/[^a-z0-9ñ]+/g, ' ').split(' ').filter(Boolean)
   return local(() => ALL_GRID_BLOCK_IDS.flatMap((blockId) => getLotsForBlock(blockId).flatMap((l) =>
     (l.deceasedNames || [])
       .filter((n) => words.every((w) => n.toLowerCase().includes(w)))
-      .map((name) => ({ lotId: l.id, blockId, lotNo: l.lotNo, classification: l.classification, status: l.status, intermentCount: l.intermentCount, name })),
+      .map((name) => ({ lotId: l.id, blockId, lotNo: l.lotNo, classification: l.classification, status: l.status, intermentCount: l.intermentCount, name, deathDate: null })),
   )).slice(0, limit))
 }
 

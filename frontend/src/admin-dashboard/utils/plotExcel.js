@@ -31,6 +31,10 @@
 //  • Name of Deceased 1, 2, …  one name (or "A & B") per cell. If the file has
 //                 these columns, a blank row clears the lot's names; if the
 //                 file has no name columns, saved names are kept.
+//  • Date of Death 1, 2, … / Date of Burial 1, 2, …  (optional) — matched to
+//                 Name of Deceased with the same number. Excel dates,
+//                 2019-03-04, 03/04/2019 (month/day/year) or "March 4, 2019".
+//                 If the file has no date columns, saved dates are kept.
 //
 // A lot listed more than once (e.g. the sheet was pasted twice) uses the LAST
 // row; the preview lists the lots whose repeated rows disagree.
@@ -55,6 +59,54 @@ const HEADERS = {
   buyer: ['buyersname', 'buyername', 'buyer', 'owner', 'ownername', 'ownersname', 'lotowner', 'purchaser'],
 }
 const isDeceasedHeader = (h) => /^(nameofdeceased|nameofthedeceased|deceased|decedent|nameofinterred|interredname|interred)/.test(h)
+const DEATH_HEADER = /^(dateofdeath|deathdate|datedied|dateofdemise|dod)(\d*)$/
+const BURIAL_HEADER = /^(dateofburial|burialdate|dateofinterment|intermentdate|dateinterred|dateburied)(\d*)$/
+
+// ── Deceased records: [{ name, deathDate, burialDate }] ─────────────────────
+// Older lots only have deceasedNames, so fall back to those (no dates).
+export function deceasedRecordsOf(lot) {
+  const recs = Array.isArray(lot?.deceasedRecords) ? lot.deceasedRecords.filter((r) => r && r.name) : []
+  if (recs.length) return recs.map((r) => ({ name: r.name, deathDate: r.deathDate || null, burialDate: r.burialDate || null }))
+  return (lot?.deceasedNames || []).map((name) => ({ name, deathDate: null, burialDate: null }))
+}
+const recordsSig = (list) => JSON.stringify((list || []).map((r) => [r.name, r.deathDate || null, r.burialDate || null]))
+
+const pad2 = (n) => String(n).padStart(2, '0')
+const isoDate = (y, m, d) => {
+  const dt = new Date(y, m - 1, d)
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d ? `${y}-${pad2(m)}-${pad2(d)}` : null
+}
+const todayIso = () => { const t = new Date(); return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}` }
+
+// Excel date / "2019-03-04" / "03/04/2019" (month/day) / "March 4, 2019" → 'YYYY-MM-DD'
+export function parseDateCell(v, label, XLSX) {
+  if (v === '' || v == null) return { value: null }
+  let iso = null
+  if (typeof v === 'number') {
+    // Excel stores dates as day numbers (1 = 1900-01-01).
+    const p = XLSX?.SSF?.parse_date_code?.(v)
+    if (p) iso = isoDate(p.y, p.m, p.d)
+    else if (v > 0 && v < 2958466) {
+      const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000)
+      iso = isoDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate())
+    }
+  } else if (v instanceof Date) {
+    iso = isoDate(v.getFullYear(), v.getMonth() + 1, v.getDate())
+  } else {
+    const s = String(v).trim()
+    let m
+    if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/))) iso = isoDate(+m[1], +m[2], +m[3])
+    else if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) iso = isoDate(+m[3], +m[1], +m[2])
+    else if (/[a-z]/i.test(s) && !Number.isNaN(Date.parse(s))) {
+      const d = new Date(s)
+      iso = isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    }
+  }
+  if (!iso) return { error: `${label} "${v}" is not a date — use 2019-03-04 or 03/04/2019` }
+  if (iso < '1900-01-01') return { error: `${label} ${iso} is before 1900` }
+  if (iso > todayIso()) return { error: `${label} ${iso} is in the future` }
+  return { value: iso }
+}
 
 // ── Status aliases → STATUS values ───────────────────────────────────────────
 const STATUS_ALIASES = {
@@ -149,15 +201,27 @@ function findHeader(rows) {
       if (idx !== -1) col[field] = idx
     })
     const deceased = cells.map((c, idx) => (isDeceasedHeader(c) ? idx : -1)).filter((idx) => idx !== -1)
+    // Date columns are matched to a name column by number ("Date of Death 2" → name 2).
+    const dateCols = (re) => {
+      const out = {}
+      cells.forEach((c, idx) => {
+        const m = c.match(re)
+        if (m) out[m[2] ? Number(m[2]) : 1] = idx
+      })
+      return out
+    }
+    const deathCols = dateCols(DEATH_HEADER)
+    const burialCols = dateCols(BURIAL_HEADER)
     const hasData = col.status != null || col.interments != null || col.classification != null || col.buyer != null || deceased.length
-    if (col.lotNo != null && hasData) return { index: i, col, deceased }
+    if (col.lotNo != null && hasData) return { index: i, col, deceased, deathCols, burialCols }
   }
   return null
 }
 
 // Reads every sheet and returns { rows, errors, sheets }.
-//   rows:   [{ blockId, lotNo, classification, status, intermentCount, deceasedNames, where }]
+//   rows:   [{ blockId, lotNo, classification, status, intermentCount, deceasedNames, deceasedRecords, where }]
 //           deceasedNames = null when the sheet has no name columns (keep saved names)
+//           deceasedRecords = null when the sheet has no date columns (keep saved dates)
 //   errors: [{ where, message }]   where = "Block 7 row 12"
 export async function readPlotFile(file, blocks, fallbackBlockId) {
   const XLSX = await loadXlsx()
@@ -176,7 +240,8 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
     sheets.push(sheetName.trim())
 
     const sheetBlock = matchBlock(sheetName, blocks)
-    const { col, deceased } = header
+    const { col, deceased, deathCols, burialCols } = header
+    const hasDateCols = Object.keys(deathCols).length > 0 || Object.keys(burialCols).length > 0
     const cell = (r, field) => (col[field] == null ? '' : r[col[field]])
 
     for (let i = header.index + 1; i < grid.length; i++) {
@@ -204,6 +269,26 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
 
       const buyer = clean(cell(r, 'buyer'))
       const names = deceased.length ? deceased.map((idx) => clean(r[idx])).filter(Boolean) : null
+
+      // Dates of death / burial, paired with Name of Deceased 1, 2, … by number.
+      let records = null
+      if (hasDateCols && deceased.length) {
+        records = []
+        let dateErr = null
+        deceased.forEach((idx, k) => {
+          if (dateErr) return
+          const n = k + 1
+          const name = clean(r[idx])
+          const death = deathCols[n] != null ? parseDateCell(r[deathCols[n]], `Date of Death ${n}`, XLSX) : { value: null }
+          const burial = burialCols[n] != null ? parseDateCell(r[burialCols[n]], `Date of Burial ${n}`, XLSX) : { value: null }
+          dateErr = death.error || burial.error || null
+          if (dateErr) return
+          if (!name && (death.value || burial.value)) { dateErr = `Date given for deceased ${n} but no name`; return }
+          if (death.value && burial.value && burial.value < death.value) { dateErr = `Date of Burial ${n} is before the date of death`; return }
+          if (name) records.push({ name, deathDate: death.value, burialDate: burial.value })
+        })
+        if (dateErr) { fail(dateErr); continue }
+      }
       const marker = markerStatus(buyer) || cls.marker || null
 
       // Status: explicit Status column → TREE/LAMP POST marker → interments → buyer.
@@ -227,7 +312,7 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
 
       rows.push({
         blockId: block.id, lotNo: lot.value, classification: cls.value, status, intermentCount,
-        deceasedNames: names, where,
+        deceasedNames: names, deceasedRecords: records, where,
       })
     }
   })
@@ -236,7 +321,7 @@ export async function readPlotFile(file, blocks, fallbackBlockId) {
 }
 
 const sameNames = (a, b) => (a || []).join('\n') === (b || []).join('\n')
-const rowSig = (r) => JSON.stringify([r.classification, r.status, r.intermentCount, r.deceasedNames])
+const rowSig = (r) => JSON.stringify([r.classification, r.status, r.intermentCount, r.deceasedNames, r.deceasedRecords])
 
 // Groups parsed rows by block and compares them with the lots already saved.
 //   existingByBlock: { [blockId]: lots[] }
@@ -285,14 +370,20 @@ export function buildImportPlan(rows, blocks, existingByBlock, reservedIds = new
         status: r.status || cur?.status || STATUS.AVAILABLE,
         intermentCount: r.intermentCount ?? cur?.intermentCount ?? 0,
         deceasedNames: r.deceasedNames,            // null = keep saved names
+        deceasedRecords: r.deceasedRecords,        // null = keep saved dates
+        recordsChanged: false,
         extraIndex: r.extraIndex,
       }
       const namesAfter = next.deceasedNames ?? cur?.deceasedNames ?? []
+      if (next.deceasedRecords) {
+        next.recordsChanged = recordsSig(next.deceasedRecords) !== recordsSig(cur ? deceasedRecordsOf(cur) : [])
+      }
       if (namesAfter.length) withNames += 1
       if (!cur) added += 1
       else if (
         cur.classification !== next.classification || cur.status !== next.status ||
-        (cur.intermentCount || 0) !== next.intermentCount || !sameNames(cur.deceasedNames, namesAfter)
+        (cur.intermentCount || 0) !== next.intermentCount || !sameNames(cur.deceasedNames, namesAfter) ||
+        next.recordsChanged
       ) {
         changed += 1
         if (reservedIds.has(r.id) && cur.status !== next.status) {
@@ -332,6 +423,8 @@ function addHelpSheet(XLSX, wb) {
     ['Status', STATUS_ORDER.map(statusLabel).join(', ') + '. "Vacant" = Available. Blank = worked out from the other columns.'],
     ['Interments', 'Number of burials: 0, 1, 2 … or X / XX. Any interment on a Sold lot makes it "With Interment".'],
     ['Name of Deceased 1, 2 …', 'One name per cell, e.g. "Rosales, Romeo". Add more columns if a lot has more names. Shown on Lot Details and searchable in the app.'],
+    ['Date of Death 1, 2 …', 'Optional. Date of death of Name of Deceased with the same number: 2019-03-04, 03/04/2019 (month/day/year) or an Excel date. Leave the whole column out to keep the dates already saved.'],
+    ['Date of Burial 1, 2 …', 'Optional. Date of burial / interment, same format. Can\'t be before the date of death.'],
     ["Buyer's Name (optional)", 'Only used to work out the status when there is no Status column: a name = Sold, blank = Available, TREE / LAMP POST = Trees / Lamp Post. It is not saved.'],
   ]
   const ws = XLSX.utils.aoa_to_sheet(help)
@@ -344,20 +437,28 @@ export async function downloadPlotWorkbook(block, lots) {
   const wb = XLSX.utils.book_new()
   const name = block ? block.name : 'Block 8'
   const cls = block?.classifications?.[0] || 'Regular'
-  const nameCols = Math.max(2, ...(lots || []).map((l) => (l.deceasedNames || []).length))
+  const nameCols = Math.max(2, ...(lots || []).map((l) => deceasedRecordsOf(l).length))
+  // Name, Date of Death, Date of Burial for each person.
   const columns = ['Block', 'Lot No', 'Classification', 'Status', 'Interments',
-    ...Array.from({ length: nameCols }, (_, i) => `Name of Deceased ${i + 1}`)]
-  const pad = (arr) => [...arr, ...Array(nameCols - arr.length).fill('')]
+    ...Array.from({ length: nameCols }, (_, i) => [`Name of Deceased ${i + 1}`, `Date of Death ${i + 1}`, `Date of Burial ${i + 1}`]).flat()]
+  const people = (records) => Array.from({ length: nameCols }, (_, i) => {
+    const r = records[i]
+    return r ? [r.name, r.deathDate || '', r.burialDate || ''] : ['', '', '']
+  }).flat()
   const data = lots && lots.length
-    ? lots.map((l) => [name, l.lotNo ?? '', l.classification, statusLabel(l.status), l.intermentCount || 0, ...pad(l.deceasedNames || [])])
+    ? lots.map((l) => [name, l.lotNo ?? '', l.classification, statusLabel(l.status), l.intermentCount || 0, ...people(deceasedRecordsOf(l))])
     : [
-        [name, 1, cls, 'Sold', 0, ...pad([])],
-        [name, 2, cls, 'Available', 0, ...pad([])],
-        [name, 3, cls, 'With Interment', 2, ...pad(['Dela Cruz, Juan', 'Dela Cruz, Maria'])],
-        [name, '', cls, 'Trees', 0, ...pad([])],
+        [name, 1, cls, 'Sold', 0, ...people([])],
+        [name, 2, cls, 'Available', 0, ...people([])],
+        [name, 3, cls, 'With Interment', 2, ...people([
+          { name: 'Dela Cruz, Juan', deathDate: '2019-03-04', burialDate: '2019-03-08' },
+          { name: 'Dela Cruz, Maria', deathDate: '2021-07-15', burialDate: '' },
+        ])],
+        [name, '', cls, 'Trees', 0, ...people([])],
       ]
   const ws = XLSX.utils.aoa_to_sheet([columns, ...data])
-  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 16 }, { wch: 16 }, { wch: 11 }, ...Array(nameCols).fill({ wch: 28 })]
+  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 16 }, { wch: 16 }, { wch: 11 },
+    ...Array.from({ length: nameCols }, () => [{ wch: 28 }, { wch: 14 }, { wch: 14 }]).flat()]
   XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31))
   addHelpSheet(XLSX, wb)
   const file = lots && lots.length ? `${name.replace(/\s+/g, '-')}-plots.xlsx` : `${name.replace(/\s+/g, '-')}-template.xlsx`

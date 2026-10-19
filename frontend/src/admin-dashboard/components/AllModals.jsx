@@ -9,9 +9,10 @@ import { paymentStatusMeta, PAYMENT_OPTION_LABEL, PAYMENT_METHOD_LABEL, INSTALLM
 import * as api from '../api'
 import {
   useValidation, hasErrors, FieldError, invalidStyle, todayISO,
-  nameError, emailError, phoneError, integerError, dateError, dateOrderError, textError, deceasedNamesError,
+  nameError, emailError, phoneError, integerError, dateError, dateOrderError, textError,
   onlyDigits, onlyPhoneChars,
 } from '../utils/validation'
+import { deceasedRecordsOf } from '../utils/plotExcel'
 
 // Shared shell: reads context.modal, renders nothing when it's not this modal's id.
 function Modal({ id, title, subtitle, children }) {
@@ -29,6 +30,10 @@ function Modal({ id, title, subtitle, children }) {
 }
 
 // ── Update Lot — look up an existing lot by block+number, set its status ────
+// With Interment: one row per person buried — name, date of death and
+// (optional) date of burial.
+const emptyPerson = () => ({ name: '', deathDate: '', burialDate: '' })
+
 function UpdateLotModal() {
   const { modal, closeModal, runAction } = useAdmin()
   const isOpen = modal?.id === 'modal-updatelot'
@@ -39,7 +44,7 @@ function UpdateLotModal() {
   const [lotNo, setLotNo] = useState('')
   const [status, setStatus] = useState(STATUS.AVAILABLE)
   const [intermentCount, setIntermentCount] = useState(1)
-  const [names, setNames] = useState('')           // names of the deceased, one per line
+  const [people, setPeople] = useState([emptyPerson()]) // [{ name, deathDate, burialDate }]
   const [saving, setSaving] = useState(false)
   const { touch, reset, setTried, shown } = useValidation()
 
@@ -54,18 +59,19 @@ function UpdateLotModal() {
     // Default to the lot's existing count when it already has interments,
     // otherwise start at 1 (about to record the first burial).
     setIntermentCount(record?.intermentCount > 0 ? record.intermentCount : 1)
-    setNames('')
+    setPeople([emptyPerson()])
     reset()
   }, [isOpen, record, reset])
 
-  // Load the lot's saved names (and interment count) once a lot is picked.
+  // Load the lot's saved people (and interment count) once a lot is picked.
   useEffect(() => {
     if (!isOpen || !blockId || !lotNo) return undefined
     let alive = true
     api.getLot(blockId, Number(lotNo))
       .then((lot) => {
         if (!alive) return
-        setNames((lot?.deceasedNames || []).join('\n'))
+        const saved = deceasedRecordsOf(lot).map((r) => ({ name: r.name, deathDate: r.deathDate || '', burialDate: r.burialDate || '' }))
+        setPeople(saved.length ? saved : [emptyPerson()])
         if (lot?.intermentCount > 0) setIntermentCount(lot.intermentCount)
       })
       .catch(() => {})
@@ -75,12 +81,36 @@ function UpdateLotModal() {
   if (!isOpen) return null
   const gridBlocks = blocks.filter((b) => b.hasGrid)
   const block = blocks.find((b) => b.id === blockId)
+  const maxPeople = Math.max(1, Number(intermentCount) || 1)
+
+  const setPerson = (i, k) => (e) => {
+    const value = e.target.value
+    setPeople((list) => list.map((p, j) => (j === i ? { ...p, [k]: value } : p)))
+  }
+  const addPerson = () => setPeople((list) => [...list, emptyPerson()])
+  const removePerson = (i) => setPeople((list) => (list.length > 1 ? list.filter((_, j) => j !== i) : [emptyPerson()]))
+
+  // Rows with nothing typed are ignored; a row with a date needs a name.
+  const filled = people.filter((p) => p.name.trim() || p.deathDate || p.burialDate)
+  const personErrors = {}
+  if (needsIntermentCount) {
+    people.forEach((p, i) => {
+      const used = p.name.trim() || p.deathDate || p.burialDate
+      personErrors[`name-${i}`] = used ? nameError(p.name, { label: 'Name' }) : ''
+      personErrors[`death-${i}`] = dateError(p.deathDate, { label: 'Date of death' })
+      personErrors[`burial-${i}`] = dateError(p.burialDate, { label: 'Date of burial' })
+        || dateOrderError(p.deathDate, p.burialDate, "Burial can't be before the date of death.")
+    })
+  }
 
   const errors = {
     blockId: blockId ? '' : 'Choose a block.',
     lotNo: integerError(lotNo, { label: 'Lot number', max: block?.maxLot || 99999 }),
     intermentCount: needsIntermentCount ? integerError(intermentCount, { label: 'Number of interments', max: 50 }) : '',
-    names: needsIntermentCount ? deceasedNamesError(names, intermentCount) : '',
+    people: needsIntermentCount && filled.length > maxPeople
+      ? `You listed ${filled.length} people but only ${maxPeople} interment${maxPeople === 1 ? '' : 's'}.`
+      : '',
+    ...personErrors,
   }
   const err = shown(errors)
 
@@ -88,18 +118,22 @@ function UpdateLotModal() {
     setTried(true)
     if (hasErrors(errors)) return
     setSaving(true)
+    const records = filled.map((p) => ({ name: p.name.trim(), deathDate: p.deathDate || null, burialDate: p.burialDate || null }))
     const ok = await runAction(
       () => api.updateLotStatus(
         blockId, Number(lotNo), status,
         needsIntermentCount ? Number(intermentCount) : undefined,
-        // With Interment → save the names; Available → clear them; others → keep.
-        needsIntermentCount ? names.split('\n').map((n) => n.trim()).filter(Boolean) : status === STATUS.AVAILABLE ? [] : undefined,
+        // With Interment → save the people; Available → clear them; others → keep.
+        needsIntermentCount ? records : status === STATUS.AVAILABLE ? [] : undefined,
       ),
       `Lot ${lotNo} updated.`,
     )
     setSaving(false)
     if (ok) closeModal()
   }
+
+  const small = { fontSize: 12, color: 'var(--dgray)', marginTop: 4 }
+  const today = todayISO()
 
   return (
     <div className="modal-overlay open" onClick={e => { if (e.target === e.currentTarget) closeModal() }}>
@@ -140,25 +174,57 @@ function UpdateLotModal() {
               style={invalidStyle(err('intermentCount'))}
             />
             <FieldError msg={err('intermentCount')} />
-            <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
-              How many people are buried in this lot.
-            </p>
+            <p style={small}>How many people are buried in this lot.</p>
           </div>
         )}
         {needsIntermentCount && (
           <div className="modal-field">
-            <label>Name(s) of Deceased</label>
-            <textarea
-              rows={3}
-              placeholder={'One name per line, e.g.\nDela Cruz, Juan'}
-              value={names}
-              onChange={e => setNames(e.target.value)}
-              onBlur={touch('names')}
-              style={invalidStyle(err('names'))}
-            />
-            <FieldError msg={err('names')} />
-            <p style={{ fontSize: 12, color: 'var(--dgray)', marginTop: 4 }}>
+            <label>Deceased</label>
+            {people.map((p, i) => (
+              <div key={i} style={{ border: '1px solid var(--lgray)', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <input
+                      placeholder="Full name, e.g. Dela Cruz, Juan" maxLength={100}
+                      value={p.name} onChange={setPerson(i, 'name')} onBlur={touch(`name-${i}`)}
+                      style={invalidStyle(err(`name-${i}`))}
+                    />
+                    <FieldError msg={err(`name-${i}`)} />
+                  </div>
+                  <button
+                    type="button" className="btn btn-ghost btn-xs" onClick={() => removePerson(i)}
+                    title="Remove this person" aria-label={`Remove person ${i + 1}`} style={{ marginTop: 4 }}
+                  >✕</button>
+                </div>
+                <div className="modal-row" style={{ marginTop: 8, marginBottom: 0 }}>
+                  <div className="modal-field" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: 11 }}>Date of Death</label>
+                    <input
+                      type="date" min="1900-01-01" max={today}
+                      value={p.deathDate} onChange={setPerson(i, 'deathDate')} onBlur={touch(`death-${i}`)}
+                      style={invalidStyle(err(`death-${i}`))}
+                    />
+                    <FieldError msg={err(`death-${i}`)} />
+                  </div>
+                  <div className="modal-field" style={{ marginBottom: 0 }}>
+                    <label style={{ fontSize: 11 }}>Date of Burial (optional)</label>
+                    <input
+                      type="date" min={p.deathDate || '1900-01-01'} max={today}
+                      value={p.burialDate} onChange={setPerson(i, 'burialDate')} onBlur={touch(`burial-${i}`)}
+                      style={invalidStyle(err(`burial-${i}`))}
+                    />
+                    <FieldError msg={err(`burial-${i}`)} />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button type="button" className="btn btn-outline btn-xs" onClick={addPerson} disabled={people.length >= maxPeople}>
+              + Add another person
+            </button>
+            <FieldError msg={errors.people} />
+            <p style={small}>
               Shown on the lot's details and searchable in the user app.
+              {people.length >= maxPeople && ' To add more people, raise the Number of Interments first.'}
             </p>
           </div>
         )}

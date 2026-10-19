@@ -9,7 +9,14 @@ import { useAdmin } from '../context/AdminContext'
 import { statusMeta, statusLabel, STATUS } from '../config/status'
 import { intermentMarks } from '../utils/format'
 import { plotLabel } from '../utils/plot'
-import { downloadPlotWorkbook } from '../utils/plotExcel'
+import { downloadPlotWorkbook, deceasedRecordsOf } from '../utils/plotExcel'
+import { formatDate } from '../utils/date'
+
+// "d. Mar 4, 2019 · buried Mar 8, 2019"
+const lifeLine = (r) => [
+  r.deathDate && `d. ${formatDate(r.deathDate)}`,
+  r.burialDate && `buried ${formatDate(r.burialDate)}`,
+].filter(Boolean).join(' · ')
 
 export default function PlotsPage() {
   const { openModal, plotBlockId: blockId, openPlotBlock, closePlotBlock, notify } = useAdmin()
@@ -23,7 +30,7 @@ export default function PlotsPage() {
   useEffect(() => {
     if (!selectedLot) return
     const fresh = lots.find((l) => l.lotNo === selectedLot.lotNo)
-    const namesChanged = (fresh?.deceasedNames || []).join('\n') !== (selectedLot.deceasedNames || []).join('\n')
+    const namesChanged = JSON.stringify(deceasedRecordsOf(fresh)) !== JSON.stringify(deceasedRecordsOf(selectedLot))
     if (fresh && (fresh.status !== selectedLot.status || fresh.intermentCount !== selectedLot.intermentCount || namesChanged)) setSelectedLot({ ...selectedLot, ...fresh })
   }, [lots, selectedLot])
 
@@ -154,11 +161,16 @@ export default function PlotsPage() {
                           <span className="detail-val">{selectedLot.intermentCount} ({marks})</span>
                         </div>
                       )}
-                      {selectedLot.deceasedNames?.length > 0 && (
+                      {deceasedRecordsOf(selectedLot).length > 0 && (
                         <div className="detail-row" style={{ alignItems: 'flex-start' }}>
                           <span className="detail-label">Deceased</span>
                           <span className="detail-val" style={{ textAlign: 'right' }}>
-                            {selectedLot.deceasedNames.map((n, i) => <div key={i}>{n}</div>)}
+                            {deceasedRecordsOf(selectedLot).map((r, i) => (
+                              <div key={i} style={{ marginBottom: 4 }}>
+                                {r.name}
+                                {lifeLine(r) && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--dgray)' }}>{lifeLine(r)}</div>}
+                              </div>
+                            ))}
                           </span>
                         </div>
                       )}
